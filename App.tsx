@@ -7,7 +7,7 @@ import {
   Flame, Mountain, Zap, Repeat, LayoutDashboard,
   ClipboardList, Search, UserCheck, CalendarDays,
   Stethoscope, FileText, Info, Brain, ChevronRight, ChevronLeft,
-  Play, BarChart3
+  Play, BarChart3, Download
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { 
@@ -331,6 +331,9 @@ export default function App() {
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // PWA Install State
+  const [installPrompt, setInstallPrompt] = useState<any>(null);
+
   // Combine DB and Local students
   const students = useMemo(() => {
     const dbIds = new Set(dbStudents.map(s => s.id));
@@ -339,6 +342,12 @@ export default function App() {
   }, [dbStudents, localStudents]);
 
   useEffect(() => {
+    // Listen for PWA install prompt
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+    });
+
     // Tenta autenticação anônima para permitir leitura/escrita no Firestore
     signInAnonymously(auth).catch((error) => {
       console.error("Auth failed:", error);
@@ -380,6 +389,18 @@ export default function App() {
     setRole('student');
     setSelectedStudentId(profile.id);
     setView('dashboard');
+  };
+
+  const handleInstallClick = () => {
+    if (installPrompt) {
+        installPrompt.prompt();
+        installPrompt.userChoice.then((choiceResult: any) => {
+            if (choiceResult.outcome === 'accepted') {
+                console.log('User accepted the install prompt');
+            }
+            setInstallPrompt(null);
+        });
+    }
   };
 
   if (loading) return <div className="h-screen w-full flex items-center justify-center bg-brand-dark"><div className="w-10 h-10 border-4 border-brand-neon border-t-transparent rounded-full animate-spin"></div></div>;
@@ -425,7 +446,9 @@ export default function App() {
         {view === 'login' && (
           <LoginScreen 
             onSelectProfessor={loginAsProfessor} 
-            onSelectStudent={() => setView('student-select')} 
+            onSelectStudent={() => setView('student-select')}
+            installPrompt={installPrompt}
+            onInstall={handleInstallClick}
           />
         )}
 
@@ -470,7 +493,7 @@ export default function App() {
 
 // --- SUB-SCREENS ---
 
-function LoginScreen({ onSelectProfessor, onSelectStudent }: any) {
+function LoginScreen({ onSelectProfessor, onSelectStudent, installPrompt, onInstall }: any) {
     return (
         <div className="h-full flex flex-col p-6 relative overflow-hidden items-center justify-center">
              {/* Geometric Background Shapes */}
@@ -478,6 +501,16 @@ function LoginScreen({ onSelectProfessor, onSelectStudent }: any) {
                  <div className="absolute top-0 right-0 w-[80vw] h-[80vw] bg-[#0f172a] rotate-12 origin-top-right transform translate-x-1/3 -translate-y-1/3" />
                  <div className="absolute bottom-0 left-0 w-[90vw] h-[90vw] bg-[#0f172a] -rotate-12 origin-bottom-left transform -translate-x-1/3 translate-y-1/3" />
              </div>
+
+             {/* INSTALL BUTTON (TOP RIGHT) */}
+             {installPrompt && (
+                <button 
+                    onClick={onInstall}
+                    className="absolute top-6 right-6 z-50 flex items-center gap-2 bg-brand-neon/10 border border-brand-neon/50 text-brand-neon px-4 py-2 rounded-full font-black uppercase text-[10px] tracking-widest hover:bg-brand-neon hover:text-brand-dark transition-all animate-bounce"
+                >
+                    <Download size={14} /> Instalar App
+                </button>
+             )}
              
              {/* HEADER AREA - CENTERED */}
             <div className="flex-1 flex flex-col items-center justify-center relative z-10 animate-in fade-in slide-in-from-bottom-8 duration-700 w-full max-w-md my-auto">
