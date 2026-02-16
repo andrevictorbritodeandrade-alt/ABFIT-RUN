@@ -17,29 +17,46 @@ import {
 import { 
   getAuth, signInAnonymously, onAuthStateChanged 
 } from 'firebase/auth';
+import { getAnalytics } from 'firebase/analytics';
 
-// --- CONFIGURAÇÃO FIREBASE ---
-const firebaseConfig = JSON.parse(process.env.FIREBASE_CONFIG || '{}');
-const app = initializeApp(Object.keys(firebaseConfig).length ? firebaseConfig : { apiKey: "demo", projectId: "demo" });
-const auth = getAuth(app);
-const db = getFirestore(app);
+// --- CONFIGURAÇÃO FIREBASE (PROJETO CHAVEUNICA) ---
+const firebaseConfig = {
+  apiKey: "AIzaSyD_C_yn_RyBSopY7Tb9aqLW8akkXJR94Vg",
+  authDomain: "chaveunica-225e0.firebaseapp.com",
+  projectId: "chaveunica-225e0",
+  storageBucket: "chaveunica-225e0.firebasestorage.app",
+  messagingSenderId: "324211037832",
+  appId: "1:324211037832:web:362a46e6446ea37b85b13d",
+  measurementId: "G-MRBDJC3QXZ"
+};
+
+// Inicializa o Firebase
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app); // Métricas de uso
+const auth = getAuth(app); // Autenticação
+const db = getFirestore(app); // Banco de Dados em Tempo Real
+
+// ID da coleção raiz para separar dados desta versão do app
 const appId = 'runtrack-elite-v4';
 
 // --- CUSTOM ICONS (SVG) ---
+
+// Ícone de Apito (Mais claro e nítido)
 const WhistleIcon = ({ className }: { className?: string }) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <path d="M11 3a6 6 0 0 0-5.86 7.46l-.66 2.55-2.92-1.74a1 1 0 0 0-1.37.36l-1.16 1.94a1 1 0 0 0 .36 1.37l4.35 2.58a1 1 0 0 0 1.25-.23l.34-.34" />
-    <path d="M6 13a6 6 0 1 0 12 0V3h-4" />
-    <path d="M18 10a3 3 0 1 1 0 6 3 3 0 0 1 0-6" />
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M13 5H9a5 5 0 0 0-5 5v2a5 5 0 0 0 5 5h3" />
+    <path d="M12 17h5a3 3 0 0 0 3-3v-1a3 3 0 0 0-3-3h-5" />
+    <circle cx="9" cy="11" r="2" />
+    <path d="M9 5V3a1 1 0 0 1 1-1h2" />
   </svg>
 );
 
+// Ícone de Tênis de Corrida (Silhueta clássica)
 const SneakerIcon = ({ className }: { className?: string }) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <path d="M19.78 15.68c.24-1.28-1.55-2.61-2.9-2.93l-4.59-1.07a3 3 0 0 1-1.68-1.06l-1.92-2.73a4 4 0 0 0-3.32-1.73A3.75 3.75 0 0 0 2 9.5a1.2 1.2 0 0 0 .33.8l2.6 2.87" />
-    <path d="M4.38 12.8c-1.23.6-2.07 1.95-2.29 3.32-.23 1.48.51 3.23 2.13 3.66l9.64 2.16a6.6 6.6 0 0 0 7.82-4.5c.24-1.06-.35-1.98-1.4-2.22" />
-    <path d="M2.5 15a4.5 4.5 0 0 1 5-4" />
-    <path d="M15 17h.01" />
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M19 14c.8 0 1.5-.7 1.5-1.5S19 10 17 9c-3 0-4 1.5-5 2l-3-1-4 2-3 2v2h17z" />
+    <path d="M2 14v3c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-3H2z" />
+    <path d="M7 12l2-2 3 2" />
   </svg>
 );
 
@@ -163,6 +180,22 @@ const WorkoutLegend = () => (
             ))}
         </div>
     </div>
+);
+
+const Footer = () => (
+    <footer className="w-full py-12 mt-auto text-center relative z-10 border-t border-white/5 bg-transparent">
+        <h6 className="text-white font-black italic uppercase tracking-wider text-sm md:text-base font-display mb-2">
+            ABFIT RUN - GESTÃO DE PERFORMANCE
+        </h6>
+        <p className="text-zinc-500 text-[10px] uppercase tracking-widest font-bold mb-6">
+            Desenvolvido por André Brito
+        </p>
+        <a href="https://wa.me/5521994527694" target="_blank" rel="noreferrer" 
+           className="inline-flex items-center gap-3 bg-white/5 hover:bg-white/10 hover:border-brand-neon/30 border border-white/10 rounded-full px-6 py-3 transition-all group backdrop-blur-sm">
+           <Phone size={14} className="text-brand-neon group-hover:scale-110 transition-transform" />
+           <span className="text-xs font-bold text-zinc-300 group-hover:text-white tracking-wider">21 994 527 694</span>
+        </a>
+    </footer>
 );
 
 // --- TYPES ---
@@ -306,16 +339,14 @@ export default function App() {
   }, [dbStudents, localStudents]);
 
   useEffect(() => {
-    if (app.options.apiKey === 'demo') {
-      setCurrentUser({ uid: 'demo-user', isAnonymous: true });
-      setLoading(false);
-      return;
-    }
+    // Tenta autenticação anônima para permitir leitura/escrita no Firestore
     signInAnonymously(auth).catch((error) => {
       console.error("Auth failed:", error);
+      // Fallback para UI
       setCurrentUser({ uid: 'fallback-user', isAnonymous: true });
       setLoading(false);
     });
+    
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       if (u) {
         setCurrentUser(u);
@@ -327,6 +358,7 @@ export default function App() {
 
   useEffect(() => {
     try {
+      // Escuta em tempo real a coleção de usuários no Firestore
       const unsub = onSnapshot(collection(db, 'artifacts', appId, 'users'), (snap) => {
         const allUsers = snap.docs.map(d => ({ id: d.id, ...d.data() } as UserProfile));
         setDbStudents(allUsers.filter(u => u.role === 'student'));
@@ -353,7 +385,7 @@ export default function App() {
   if (loading) return <div className="h-screen w-full flex items-center justify-center bg-brand-dark"><div className="w-10 h-10 border-4 border-brand-neon border-t-transparent rounded-full animate-spin"></div></div>;
 
   return (
-    <div className="min-h-screen bg-brand-dark text-white font-sans selection:bg-brand-neon selection:text-brand-dark">
+    <div className="min-h-screen bg-brand-dark text-white font-sans selection:bg-brand-neon selection:text-brand-dark flex flex-col">
       {/* Background Ambience */}
       <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
         <div className="absolute top-[-20%] right-[-10%] w-[800px] h-[800px] bg-brand-neon/5 rounded-full blur-[120px]" />
@@ -388,7 +420,7 @@ export default function App() {
       )}
 
       {/* Main Content */}
-      <main className={`relative z-10 transition-all duration-500 ${view !== 'login' && view !== 'new-athlete-assessment' ? 'pt-28 pb-12 px-6' : ''}`}>
+      <main className={`relative z-10 transition-all duration-500 flex-1 ${view !== 'login' && view !== 'new-athlete-assessment' ? 'pt-28 pb-12 px-6' : ''}`}>
         
         {view === 'login' && (
           <LoginScreen 
@@ -430,6 +462,8 @@ export default function App() {
         )}
 
       </main>
+
+      <Footer />
     </div>
   );
 }
@@ -438,7 +472,7 @@ export default function App() {
 
 function LoginScreen({ onSelectProfessor, onSelectStudent }: any) {
     return (
-        <div className="h-screen flex flex-col p-6 relative overflow-hidden bg-[#020617] items-center justify-center">
+        <div className="h-full flex flex-col p-6 relative overflow-hidden items-center justify-center">
              {/* Geometric Background Shapes */}
              <div className="absolute inset-0 z-0 opacity-20 overflow-hidden pointer-events-none">
                  <div className="absolute top-0 right-0 w-[80vw] h-[80vw] bg-[#0f172a] rotate-12 origin-top-right transform translate-x-1/3 -translate-y-1/3" />
@@ -446,7 +480,7 @@ function LoginScreen({ onSelectProfessor, onSelectStudent }: any) {
              </div>
              
              {/* HEADER AREA - CENTERED */}
-            <div className="flex-1 flex flex-col items-center justify-center relative z-10 animate-in fade-in slide-in-from-bottom-8 duration-700 w-full max-w-md">
+            <div className="flex-1 flex flex-col items-center justify-center relative z-10 animate-in fade-in slide-in-from-bottom-8 duration-700 w-full max-w-md my-auto">
                 
                 {/* HEART PULSE LOGO */}
                 <div className="mb-12">
@@ -810,7 +844,7 @@ function ProfessorDashboard({ students, selectedStudentId, onSelectStudent, onNe
                             <span className="text-xs font-bold text-zinc-500 uppercase tracking-[0.2em]">Gestão de Equipe</span>
                          </div>
                          <h2 className="text-5xl md:text-7xl font-black italic uppercase tracking-tighter text-white leading-[0.85] font-display">
-                            Meu <span className="text-brand-neon">Squad</span>
+                            Meus <span className="text-brand-neon">Alunos</span>
                          </h2>
                     </div>
                     
