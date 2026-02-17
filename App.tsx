@@ -41,25 +41,6 @@ const appId = 'runtrack-elite-v4';
 
 // --- CUSTOM ICONS (SVG) ---
 
-// Ícone de Apito (Mais claro e nítido)
-const WhistleIcon = ({ className }: { className?: string }) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <path d="M13 5H9a5 5 0 0 0-5 5v2a5 5 0 0 0 5 5h3" />
-    <path d="M12 17h5a3 3 0 0 0 3-3v-1a3 3 0 0 0-3-3h-5" />
-    <circle cx="9" cy="11" r="2" />
-    <path d="M9 5V3a1 1 0 0 1 1-1h2" />
-  </svg>
-);
-
-// Ícone de Tênis de Corrida (Silhueta clássica)
-const SneakerIcon = ({ className }: { className?: string }) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <path d="M19 14c.8 0 1.5-.7 1.5-1.5S19 10 17 9c-3 0-4 1.5-5 2l-3-1-4 2-3 2v2h17z" />
-    <path d="M2 14v3c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-3H2z" />
-    <path d="M7 12l2-2 3 2" />
-  </svg>
-);
-
 const RunnerLogoIcon = ({ className, size = 24 }: { className?: string, size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
       <path d="M17 16l-3-1" />
@@ -326,20 +307,12 @@ export default function App() {
   const [view, setView] = useState<'login' | 'student-select' | 'dashboard' | 'new-athlete-assessment'>('login');
   
   // Data State
-  const [dbStudents, setDbStudents] = useState<UserProfile[]>([]);
-  const [localStudents, setLocalStudents] = useState<UserProfile[]>([]);
+  const [students, setStudents] = useState<UserProfile[]>([]);
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   // PWA Install State
   const [installPrompt, setInstallPrompt] = useState<any>(null);
-
-  // Combine DB and Local students
-  const students = useMemo(() => {
-    const dbIds = new Set(dbStudents.map(s => s.id));
-    const uniqueLocal = localStudents.filter(s => !dbIds.has(s.id));
-    return [...dbStudents, ...uniqueLocal];
-  }, [dbStudents, localStudents]);
 
   useEffect(() => {
     // Listen for PWA install prompt
@@ -370,7 +343,7 @@ export default function App() {
       // Escuta em tempo real a coleção de usuários no Firestore
       const unsub = onSnapshot(collection(db, 'artifacts', appId, 'users'), (snap) => {
         const allUsers = snap.docs.map(d => ({ id: d.id, ...d.data() } as UserProfile));
-        setDbStudents(allUsers.filter(u => u.role === 'student'));
+        setStudents(allUsers.filter(u => u.role === 'student'));
       }, (error) => console.error(error));
       return () => unsub();
     } catch (e) {
@@ -463,7 +436,6 @@ export default function App() {
         {view === 'new-athlete-assessment' && role === 'professor' && (
             <AthleteAssessmentWizard 
                 onCancel={() => setView('dashboard')}
-                onSaveLocal={(student: UserProfile) => setLocalStudents(prev => [...prev, student])}
                 onComplete={(newStudentId) => {
                     setSelectedStudentId(newStudentId);
                     setView('dashboard');
@@ -539,7 +511,7 @@ function LoginScreen({ onSelectProfessor, onSelectStudent, installPrompt, onInst
                         onClick={onSelectProfessor}
                         className="group relative h-48 bg-[#0f172a]/60 backdrop-blur-md rounded-2xl border border-white/10 flex flex-col items-center justify-center p-4 hover:border-brand-neon/50 transition-all duration-300 active:scale-95"
                     >
-                         <WhistleIcon className="w-12 h-12 text-brand-neon mb-4 drop-shadow-[0_0_8px_rgba(207,255,4,0.5)]" />
+                         <ClipboardList className="w-12 h-12 text-brand-neon mb-4 drop-shadow-[0_0_8px_rgba(207,255,4,0.5)]" />
                          <h2 className="text-white font-black uppercase text-sm leading-none mb-2 font-display tracking-wider">TREINADOR</h2>
                          <p className="text-[9px] text-zinc-300 font-bold uppercase tracking-widest text-center">CENTRO DE COMANDO</p>
                     </button>
@@ -549,7 +521,7 @@ function LoginScreen({ onSelectProfessor, onSelectStudent, installPrompt, onInst
                         onClick={onSelectStudent}
                         className="group relative h-48 bg-[#0f172a]/60 backdrop-blur-md rounded-2xl border border-white/10 flex flex-col items-center justify-center p-4 hover:border-brand-neon/50 transition-all duration-300 active:scale-95"
                     >
-                         <SneakerIcon className="w-12 h-12 text-brand-neon mb-4 drop-shadow-[0_0_8px_rgba(207,255,4,0.5)]" />
+                         <HeartPulse className="w-12 h-12 text-brand-neon mb-4 drop-shadow-[0_0_8px_rgba(207,255,4,0.5)]" />
                          <h2 className="text-white font-black uppercase text-sm leading-none mb-2 font-display tracking-wider">ATLETA</h2>
                          <p className="text-[9px] text-zinc-300 font-bold uppercase tracking-widest text-center">ZONA DE PERFORMANCE</p>
                     </button>
@@ -643,7 +615,7 @@ function StudentLoginList({ students, onLogin, onBack }: { students: UserProfile
 
 // --- WIZARD DE AVALIAÇÃO ---
 
-function AthleteAssessmentWizard({ onCancel, onComplete, onSaveLocal }: { onCancel: () => void, onComplete: (id: string) => void, onSaveLocal: (u: UserProfile) => void }) {
+function AthleteAssessmentWizard({ onCancel, onComplete }: { onCancel: () => void, onComplete: (id: string) => void }) {
     const [step, setStep] = useState(1);
     const [loading, setLoading] = useState(false);
     const [calculatedAge, setCalculatedAge] = useState<number | null>(null);
@@ -692,20 +664,14 @@ function AthleteAssessmentWizard({ onCancel, onComplete, onSaveLocal }: { onCanc
         }
         setLoading(true);
         try {
-            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000));
-            const savePromise = addDoc(collection(db, 'artifacts', appId, 'users'), {
+            const docRef = await addDoc(collection(db, 'artifacts', appId, 'users'), {
                 ...formData,
                 createdAt: new Date().toISOString()
             });
-
-            const docRef = await Promise.race([savePromise, timeoutPromise]) as any;
             onComplete(docRef.id);
         } catch (e) {
-            console.warn("Using local fallback:", e);
-            const localId = `local_${Date.now()}`;
-            const studentData = { ...formData, id: localId, createdAt: new Date().toISOString() } as UserProfile;
-            onSaveLocal(studentData);
-            onComplete(localId);
+            console.error("Error saving to Firestore:", e);
+            alert("Erro ao salvar no banco de dados. Verifique sua conexão e tente novamente.");
         } finally {
             setLoading(false);
         }
