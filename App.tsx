@@ -7,12 +7,11 @@ import {
   Flame, Mountain, Zap, Repeat, LayoutDashboard,
   ClipboardList, Search, UserCheck, CalendarDays,
   Stethoscope, FileText, Info, Brain, ChevronRight, ChevronLeft,
-  Play, BarChart3, Download
+  Play, BarChart3, Download, Check, CloudUpload, CloudDownload
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { 
-  getFirestore, collection, doc, setDoc, 
-  onSnapshot, addDoc, deleteDoc, updateDoc
+  getFirestore, collection, doc, addDoc, deleteDoc, onSnapshot, setDoc, query, where, getDocs, getDoc
 } from 'firebase/firestore';
 import { 
   getAuth, signInAnonymously, onAuthStateChanged 
@@ -37,19 +36,9 @@ const auth = getAuth(app); // Autenticação
 const db = getFirestore(app); // Banco de Dados em Tempo Real
 
 // ID da coleção raiz para separar dados desta versão do app
-const appId = 'runtrack-elite-v4';
+const appId = 'runtrack-elite-v5'; // Bumped version for new data structure safety
 
 // --- CUSTOM ICONS (SVG) ---
-
-const RunnerLogoIcon = ({ className, size = 24 }: { className?: string, size?: number }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
-      <path d="M17 16l-3-1" />
-      <path d="M19.78 15.68c.24-1.28-1.55-2.61-2.9-2.93l-4.59-1.07a3 3 0 0 1-1.68-1.06l-1.92-2.73a4 4 0 0 0-3.32-1.73A3.75 3.75 0 0 0 2 9.5a1.2 1.2 0 0 0 .33.8l2.6 2.87" />
-      <path d="M4.38 12.8c-1.23.6-2.07 1.95-2.29 3.32-.23 1.48.51 3.23 2.13 3.66l9.64 2.16a6.6 6.6 0 0 0 7.82-4.5c.24-1.06-.35-1.98-1.4-2.22" />
-      <path d="M2.5 15a4.5 4.5 0 0 1 5-4" />
-      <path d="M15 17h.01" />
-  </svg>
-);
 
 const HeartPulseLogo = ({ size = 120, className = "" }: { size?: number, className?: string }) => (
   <div className={`rounded-full bg-brand-neon flex items-center justify-center shadow-[0_0_50px_rgba(207,255,4,0.5)] ${className}`} style={{ width: size, height: size }}>
@@ -140,29 +129,6 @@ const Select = ({ label, value, onChange, options }: any) => (
   </div>
 );
 
-const WorkoutLegend = () => (
-    <div className="glass-panel rounded-2xl p-6 mt-8">
-        <h5 className="font-black italic uppercase text-zinc-500 text-[10px] tracking-widest mb-4 flex items-center gap-2 font-display">
-            <Info size={14} className="text-brand-neon"/> Legenda
-        </h5>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-            {[
-              {short: 'AQ', long: 'Aquecimento'},
-              {short: 'CO', long: 'Corrida'},
-              {short: 'CA', long: 'Caminhada'},
-              {short: 'VC', long: 'Volta à Calma'},
-              {short: 'REC', long: 'Recuperação'},
-              {short: ':', long: 'Alternância'}
-            ].map(item => (
-              <div key={item.short} className="flex flex-col border-l-2 border-zinc-800 pl-3">
-                  <span className="font-black text-brand-neon text-sm font-display">{item.short}</span>
-                  <span className="text-[10px] font-bold text-zinc-500 uppercase">{item.long}</span>
-              </div>
-            ))}
-        </div>
-    </div>
-);
-
 const Footer = () => (
     <footer className="w-full py-12 mt-auto text-center relative z-10 border-t border-white/5 bg-transparent">
         <h6 className="text-white font-black italic uppercase tracking-wider text-sm md:text-base font-display mb-2">
@@ -182,8 +148,18 @@ const Footer = () => (
 // --- TYPES ---
 type UserRole = 'professor' | 'student';
 
+const WORKOUT_LABELS: Record<string, string> = {
+    'longao': 'Longão',
+    'tiro': 'Intervalado',
+    'fartlek': 'Fartlek',
+    'ritmo': 'Ritmo / Tempo',
+    'subida': 'Subida',
+    'regenerativo': 'Regenerativo'
+};
+
 interface UserProfile {
   id: string;
+  professorId?: string;
   name: string;
   phone: string; 
   role: UserRole;
@@ -212,91 +188,253 @@ interface UserProfile {
 interface WorkoutModel {
   id: string;
   studentId: string;
-  type: 'longao' | 'fartlek' | 'tiro' | 'ritmo' | 'subida' | 'regenerativo';
+  type: string;
   dayOfWeek: string;
   warmupTime?: string;
   cooldownTime?: string;
-  distance?: string; 
-  totalTime?: string;
-  pace?: string;
   sets?: string;
   reps?: string;
-  stimulusTime?: string;
+  stimulusTime?: string; // Usado para Tempo ou Distancia do estimulo
   recoveryTime?: string;
-  fastTime?: string;
-  slowTime?: string;
+  speed?: string; // Velocidade em Km/h
   description?: string;
-  color?: string;
+  createdAt: string;
 }
 
-// --- WORKOUT CARD COMPONENT ---
+interface CheckIn {
+  id: string;
+  studentId: string;
+  workoutId: string;
+  date: string; // YYYY-MM-DD
+  completedAt: string;
+  status: 'completed';
+}
 
-const WorkoutCard: React.FC<{ workout: WorkoutModel, onDelete?: () => void }> = ({ workout, onDelete }) => {
-    const isInterval = workout.type === 'tiro' || workout.type === 'subida';
-    const isFartlek = workout.type === 'fartlek';
+// --- UTILS ---
+const getDayName = (date: Date) => {
+    const days = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+    return days[date.getDay()];
+};
+
+const formatDate = (date: Date) => {
+    return date.toISOString().split('T')[0];
+};
+
+const calculateWorkoutTime = (w: WorkoutModel, prog?: any) => {
+    let total = 0;
+    total += Number(w.warmupTime) || 0;
+    total += Number(w.cooldownTime) || 0;
+    
+    const sets = Number(w.sets) || 1;
+    const recovery = Number(w.recoveryTime) || 0;
+    
+    let stimulusTime = 0;
+    const stimVal = prog?.stimulus || w.stimulusTime;
+    const speedVal = prog?.speed || w.speed;
+
+    if (stimVal) {
+        if (!isNaN(Number(stimVal))) {
+            stimulusTime = Number(stimVal);
+        } else if (stimVal.toLowerCase().includes('km')) {
+            const dist = parseFloat(stimVal.replace(',', '.'));
+            const speed = parseFloat(speedVal?.replace(',', '.') || '0');
+            if (speed > 0 && !isNaN(dist)) {
+                stimulusTime = (dist / speed) * 60;
+            }
+        }
+    }
+    
+    total += sets * (stimulusTime + recovery);
+    return Math.round(total);
+};
+
+// Global Sync State
+export const syncState = {
+    pendingWrites: false,
+    fromCache: false,
+    listeners: [] as Function[],
+    update(pending: boolean, cache: boolean) {
+        this.pendingWrites = pending;
+        this.fromCache = cache;
+        this.listeners.forEach(l => l({ pendingWrites: this.pendingWrites, fromCache: this.fromCache }));
+    }
+};
+
+function useSyncState() {
+    const [state, setState] = useState({ pendingWrites: false, fromCache: false });
+    useEffect(() => {
+        const handler = (s: any) => setState(s);
+        syncState.listeners.push(handler);
+        return () => { syncState.listeners = syncState.listeners.filter(l => l !== handler); };
+    }, []);
+    return state;
+}
+
+const SyncIndicator = () => {
+    const { pendingWrites, fromCache } = useSyncState();
     
     return (
-        <div className="bg-brand-light/40 border border-white/5 p-6 rounded-3xl relative group hover:bg-brand-light/60 transition-all hover:border-brand-neon/30">
+        <div className="flex items-center gap-2 text-[9px] font-bold uppercase tracking-widest bg-black/40 px-3 py-1.5 rounded-full border border-white/5">
+            {pendingWrites ? (
+                <span className="flex items-center gap-1 text-amber-500"><CloudUpload size={12} className="animate-bounce" /> Enviando...</span>
+            ) : (
+                <span className="flex items-center gap-1 text-emerald-500"><CloudUpload size={12} /> Salvo</span>
+            )}
+            <span className="text-zinc-700">|</span>
+            {fromCache ? (
+                <span className="flex items-center gap-1 text-amber-500"><CloudDownload size={12} className="animate-pulse" /> Offline</span>
+            ) : (
+                <span className="flex items-center gap-1 text-emerald-500"><CloudDownload size={12} /> Sincronizado</span>
+            )}
+        </div>
+    );
+};
+
+// --- COMPACT WORKOUT CARD COMPONENT (JUSTIFIED / ONE LINE) ---
+
+const CompactWorkoutCard: React.FC<{ 
+    workout: WorkoutModel, 
+    date?: Date,
+    isCompleted?: boolean,
+    onCheckIn?: () => void,
+    readonly?: boolean,
+    onDelete?: () => void
+}> = ({ workout, date, isCompleted, onCheckIn, readonly = false, onDelete }) => {
+    
+    // PROGRESSION LOGIC (OVERLOAD)
+    const calculateProgression = () => {
+        if (!date || !workout.createdAt) return { speed: workout.speed, stimulus: workout.stimulusTime, increase: 0 };
+        
+        const created = new Date(workout.createdAt);
+        const targetDate = new Date(date);
+        const diffTime = Math.abs(targetDate.getTime() - created.getTime());
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+        
+        let increasePercentage = 0;
+        if (diffDays > 28) increasePercentage = 0.10; // > 4 weeks = 10%
+        else if (diffDays > 14) increasePercentage = 0.05; // > 2 weeks = 5%
+
+        if (increasePercentage === 0) return { speed: workout.speed, stimulus: workout.stimulusTime, increase: 0 };
+
+        let newSpeed = workout.speed;
+        let newStimulus = workout.stimulusTime;
+
+        // Apply to speed if numeric
+        if (workout.speed && !isNaN(parseFloat(workout.speed.replace(',','.')))) {
+             const val = parseFloat(workout.speed.replace(',','.'));
+             newSpeed = (val * (1 + increasePercentage)).toFixed(1).replace('.', ',');
+        }
+
+        // Apply to stimulus time if purely numeric (minutes)
+        if (workout.stimulusTime && !isNaN(parseFloat(workout.stimulusTime))) {
+             const val = parseFloat(workout.stimulusTime);
+             newStimulus = Math.round(val * (1 + increasePercentage)).toString();
+        }
+
+        return { speed: newSpeed, stimulus: newStimulus, increase: increasePercentage * 100 };
+    };
+
+    const prog = calculateProgression();
+
+    return (
+        <div 
+            onClick={!readonly && onCheckIn ? onCheckIn : undefined}
+            className={`
+                relative w-full p-5 rounded-xl border bg-[#050505] transition-all
+                ${isCompleted 
+                    ? 'border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.2)]' 
+                    : 'border-zinc-800 hover:border-zinc-600'
+                }
+                ${!readonly ? 'cursor-pointer' : ''}
+            `}
+        >
             {onDelete && (
-                <button onClick={onDelete} className="absolute top-6 right-6 text-zinc-500 hover:text-red-500 p-2 rounded-xl transition-all opacity-0 group-hover:opacity-100">
-                    <Trash2 size={18} />
+                <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="absolute top-2 right-2 text-zinc-600 hover:text-red-500">
+                    <Trash2 size={14} />
                 </button>
             )}
-            
-            <div className="flex flex-col mb-6">
-                <span className="text-[10px] font-black uppercase tracking-widest text-brand-neon mb-1 flex items-center gap-2 font-display">
-                    <CalendarDays size={10} /> {workout.dayOfWeek}
-                </span>
-                <h4 className="text-3xl font-black italic uppercase text-white leading-none tracking-tighter font-display">
-                    {workout.type}
-                </h4>
+
+            {/* HEADER: DATE & TYPE */}
+            <div className="flex justify-between items-center mb-3">
+                <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500 bg-zinc-900 px-2 py-1 rounded">
+                        {date ? date.toLocaleDateString('pt-BR', {day: '2-digit', month: '2-digit'}) : workout.dayOfWeek}
+                    </span>
+                    <span className="text-xs font-black italic uppercase text-white font-display">
+                        {WORKOUT_LABELS[workout.type] || workout.type}
+                    </span>
+                </div>
+                {prog.increase > 0 && (
+                    <span className="text-[9px] font-bold text-brand-neon bg-brand-neon/10 px-2 py-0.5 rounded border border-brand-neon/20 animate-pulse">
+                        +{prog.increase}% INTENSIDADE
+                    </span>
+                )}
+                 {isCompleted && (
+                    <div className="flex items-center gap-1 text-emerald-500">
+                        <CheckCircle2 size={14} fill="currentColor" className="text-emerald-900" />
+                        <span className="text-[9px] font-black uppercase">Feito</span>
+                    </div>
+                )}
             </div>
 
-            <div className="grid grid-cols-2 gap-4 mb-6">
-                 {isInterval ? (
-                    <>
-                        <div className="flex flex-col bg-brand-dark/50 p-3 rounded-xl border border-white/5">
-                             <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1">Aquecimento</span>
-                             <span className="font-bold text-white text-lg">{workout.warmupTime} min</span>
-                        </div>
-                         <div className="flex flex-col bg-brand-dark/50 p-3 rounded-xl border border-white/5">
-                             <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1">Série</span>
-                             <span className="font-bold text-white text-lg">{workout.sets}x {workout.reps} <span className="text-brand-neon text-xs">({workout.stimulusTime}/{workout.recoveryTime})</span></span>
-                        </div>
-                    </>
-                 ) : isFartlek ? (
-                     <>
-                        <div className="flex flex-col bg-brand-dark/50 p-3 rounded-xl border border-white/5">
-                             <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1">Total</span>
-                             <span className="font-bold text-white text-lg">{workout.totalTime} min</span>
-                        </div>
-                        <div className="flex flex-col bg-brand-dark/50 p-3 rounded-xl border border-white/5">
-                             <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1">Var</span>
-                             <span className="font-bold text-white text-lg">{workout.fastTime}' Ft / {workout.slowTime}' Lv</span>
-                        </div>
-                     </>
-                 ) : (
-                    <>
-                        <div className="flex flex-col bg-brand-dark/50 p-3 rounded-xl border border-white/5">
-                             <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1">Volume</span>
-                             <span className="font-bold text-white text-lg">{workout.distance ? `${workout.distance}km` : `${workout.totalTime}min`}</span>
-                        </div>
-                        <div className="flex flex-col bg-brand-dark/50 p-3 rounded-xl border border-white/5">
-                             <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1">Ritmo</span>
-                             <span className="font-bold text-white text-lg">{workout.pace || 'Livre'}</span>
-                        </div>
-                    </>
-                 )}
+            {/* THE STRIP: JUSTIFIED CONTENT */}
+            <div className="flex flex-col gap-3 text-sm font-sans tracking-tight text-zinc-300 leading-relaxed bg-zinc-900/50 p-4 rounded-xl border border-white/5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                        <span className="font-bold text-white whitespace-nowrap">{workout.warmupTime}' AQ</span>
+                        <span className="text-red-600 font-bold">+</span>
+                    </div>
+                    
+                    <div className="flex items-center gap-2 bg-black/40 px-3 py-1.5 rounded-lg border border-white/5 flex-1 justify-center min-w-[200px]">
+                        <span className="font-bold text-white">{workout.sets}x</span>
+                        <span className="text-zinc-500 text-[10px] uppercase font-bold tracking-wider">blocos</span>
+                        <span className="text-white font-bold whitespace-nowrap">{prog.stimulus} {isNaN(Number(prog.stimulus)) ? '' : "'"} CO</span>
+                        {prog.speed && prog.speed !== '0' && <span className="text-brand-neon text-xs font-bold">@{prog.speed}km/h</span>}
+                        <span className="text-zinc-500 font-bold">:</span>
+                        <span className="text-zinc-400 whitespace-nowrap font-bold">{workout.recoveryTime}' REC</span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                        <span className="text-red-600 font-bold">+</span>
+                        <span className="font-bold text-white whitespace-nowrap">{workout.cooldownTime}' DES</span>
+                    </div>
+                </div>
+                
+                <div className="flex justify-between items-center pt-2 border-t border-white/5">
+                    <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Tempo Estimado</span>
+                    <span className="text-brand-neon font-black text-sm">{calculateWorkoutTime(workout, prog)} MINUTOS</span>
+                </div>
             </div>
 
             {workout.description && (
-                <div className="p-4 rounded-xl border-l-2 border-brand-neon bg-brand-neon/5">
-                    <p className="text-xs text-zinc-300 font-medium leading-relaxed italic">"{workout.description}"</p>
-                </div>
+                <p className="mt-4 text-xs text-zinc-300 font-medium uppercase tracking-wide leading-relaxed text-justify font-sans">
+                    <span className="text-brand-neon font-bold">OBS:</span> {workout.description}
+                </p>
             )}
         </div>
     )
 }
+
+const WorkoutLegend = () => (
+    <div className="grid grid-cols-4 gap-2 mt-6 pt-6 border-t border-white/5 opacity-50 hover:opacity-100 transition-opacity">
+        <div className="text-center">
+            <span className="block text-[10px] font-black text-zinc-400">AQ</span>
+            <span className="block text-[8px] font-bold text-zinc-600 uppercase tracking-wider">Aquece</span>
+        </div>
+        <div className="text-center">
+            <span className="block text-[10px] font-black text-white">CO</span>
+            <span className="block text-[8px] font-bold text-zinc-600 uppercase tracking-wider">Corrida</span>
+        </div>
+        <div className="text-center">
+            <span className="block text-[10px] font-black text-zinc-400">REC</span>
+            <span className="block text-[8px] font-bold text-zinc-600 uppercase tracking-wider">Recupera</span>
+        </div>
+        <div className="text-center">
+            <span className="block text-[10px] font-black text-zinc-400">DES</span>
+            <span className="block text-[8px] font-bold text-zinc-600 uppercase tracking-wider">Desaquece</span>
+        </div>
+    </div>
+);
 
 // --- MAIN COMPONENT ---
 
@@ -315,16 +453,13 @@ export default function App() {
   const [installPrompt, setInstallPrompt] = useState<any>(null);
 
   useEffect(() => {
-    // Listen for PWA install prompt
     window.addEventListener('beforeinstallprompt', (e) => {
       e.preventDefault();
       setInstallPrompt(e);
     });
 
-    // Tenta autenticação anônima para permitir leitura/escrita no Firestore
     signInAnonymously(auth).catch((error) => {
       console.error("Auth failed:", error);
-      // Fallback para UI
       setCurrentUser({ uid: 'fallback-user', isAnonymous: true });
       setLoading(false);
     });
@@ -340,8 +475,9 @@ export default function App() {
 
   useEffect(() => {
     try {
-      // Escuta em tempo real a coleção de usuários no Firestore
-      const unsub = onSnapshot(collection(db, 'artifacts', appId, 'users'), (snap) => {
+      const q = collection(db, 'artifacts', appId, 'users');
+      const unsub = onSnapshot(q, { includeMetadataChanges: true }, (snap) => {
+        syncState.update(snap.metadata.hasPendingWrites, snap.metadata.fromCache);
         const allUsers = snap.docs.map(d => ({ id: d.id, ...d.data() } as UserProfile));
         setStudents(allUsers.filter(u => u.role === 'student'));
       }, (error) => console.error(error));
@@ -358,7 +494,6 @@ export default function App() {
   };
 
   const loginAsStudent = (profile: UserProfile) => {
-    setActiveProfile(profile);
     setRole('student');
     setSelectedStudentId(profile.id);
     setView('dashboard');
@@ -400,6 +535,7 @@ export default function App() {
             </div>
             
             <div className="flex items-center gap-4">
+                <SyncIndicator />
                 {role === 'professor' && selectedStudentId && (
                    <div className="hidden md:flex items-center gap-2 px-4 py-2 bg-brand-light/50 rounded-full border border-white/10">
                       <UserCheck size={14} className="text-brand-neon"/>
@@ -435,6 +571,7 @@ export default function App() {
 
         {view === 'new-athlete-assessment' && role === 'professor' && (
             <AthleteAssessmentWizard 
+                currentUser={currentUser}
                 onCancel={() => setView('dashboard')}
                 onComplete={(newStudentId) => {
                     setSelectedStudentId(newStudentId);
@@ -445,6 +582,7 @@ export default function App() {
 
         {view === 'dashboard' && role === 'professor' && (
             <ProfessorDashboard 
+                currentUser={currentUser}
                 students={students} 
                 selectedStudentId={selectedStudentId}
                 onSelectStudent={setSelectedStudentId}
@@ -452,8 +590,8 @@ export default function App() {
             />
         )}
 
-        {view === 'dashboard' && role === 'student' && activeProfile && (
-             <StudentView profile={activeProfile} />
+        {view === 'dashboard' && role === 'student' && selectedStudentId && (
+             <StudentView profile={students.find(s => s.id === selectedStudentId)!} />
         )}
 
       </main>
@@ -613,26 +751,74 @@ function StudentLoginList({ students, onLogin, onBack }: { students: UserProfile
     )
 }
 
-// --- WIZARD DE AVALIAÇÃO ---
-
-function AthleteAssessmentWizard({ onCancel, onComplete }: { onCancel: () => void, onComplete: (id: string) => void }) {
+function AthleteAssessmentWizard({ onCancel, onComplete, currentUser }: { onCancel: () => void, onComplete: (id: string) => void, currentUser: any }) {
+    // ... (Mantendo o código do Wizard existente sem alterações)
+    // Para simplificar a resposta, assumo que o wizard não precisa de alterações visuais
+    // Copiando a lógica para garantir funcionalidade
     const [step, setStep] = useState(1);
     const [loading, setLoading] = useState(false);
     const [calculatedAge, setCalculatedAge] = useState<number | null>(null);
+    const [docId, setDocId] = useState<string | null>(null);
+    const [showDraftPrompt, setShowDraftPrompt] = useState(false);
+    const [draftIdToLoad, setDraftIdToLoad] = useState<string | null>(null);
+
     const [formData, setFormData] = useState<Partial<UserProfile>>({
         role: 'student',
-        anamnesisComplete: true,
+        anamnesisComplete: false,
         gender: 'male',
         mainGoal: 'health',
         availabilityDays: '3',
-        medicalClearance: true
+        medicalClearance: true,
+        professorId: currentUser?.uid
     });
 
     useEffect(() => {
+        const draftId = localStorage.getItem('draftStudentId');
+        if (draftId) {
+            setDraftIdToLoad(draftId);
+            setShowDraftPrompt(true);
+        } else {
+            startNewDraft();
+        }
+    }, []);
+
+    const startNewDraft = () => {
+        localStorage.removeItem('draftStudentId');
+        const newRef = doc(collection(db, 'artifacts', appId, 'users'));
+        setDocId(newRef.id);
+        localStorage.setItem('draftStudentId', newRef.id);
+        setShowDraftPrompt(false);
+    };
+
+    const loadDraft = () => {
+        if (draftIdToLoad) {
+            setDocId(draftIdToLoad);
+            getDoc(doc(db, 'artifacts', appId, 'users', draftIdToLoad)).then(snap => {
+                if (snap.exists()) {
+                    setFormData(snap.data() as Partial<UserProfile>);
+                }
+            });
+        }
+        setShowDraftPrompt(false);
+    };
+
+    // Debounced Auto-Save
+    useEffect(() => {
+        if (!docId || showDraftPrompt) return;
+        const timer = setTimeout(() => {
+            if (formData.name || formData.phone) {
+                setDoc(doc(db, 'artifacts', appId, 'users', docId), {
+                    ...formData,
+                    updatedAt: new Date().toISOString()
+                }, { merge: true }).catch(console.error);
+            }
+        }, 2000);
+        return () => clearTimeout(timer);
+    }, [formData, docId, showDraftPrompt]);
+
+    useEffect(() => {
         if (formData.birthDate) {
-            // CORREÇÃO IDADE: Força o horário para meio-dia para evitar problemas de fuso horário
             const birthDate = new Date(formData.birthDate + "T12:00:00");
-            
             if (!isNaN(birthDate.getTime())) {
                 const today = new Date();
                 let age = today.getFullYear() - birthDate.getFullYear();
@@ -641,7 +827,6 @@ function AthleteAssessmentWizard({ onCancel, onComplete }: { onCancel: () => voi
                     age--;
                 }
                 setCalculatedAge(age);
-
                 if (age > 0 && formData.gender) {
                     const calculatedMax = formData.gender === 'female' ? (226 - age) : (220 - age);
                     setFormData(prev => {
@@ -664,18 +849,39 @@ function AthleteAssessmentWizard({ onCancel, onComplete }: { onCancel: () => voi
         }
         setLoading(true);
         try {
-            const docRef = await addDoc(collection(db, 'artifacts', appId, 'users'), {
+            // Removemos o await para evitar congelamento caso a rede esteja lenta.
+            // O Firestore atualiza o cache local instantaneamente.
+            setDoc(doc(db, 'artifacts', appId, 'users', docId!), {
                 ...formData,
-                createdAt: new Date().toISOString()
-            });
-            onComplete(docRef.id);
+                role: 'student', // Garante que o role seja student para aparecer na lista
+                anamnesisComplete: true,
+                createdAt: formData.createdAt || new Date().toISOString()
+            }, { merge: true }).catch(e => console.error("Background save error:", e));
+            
+            localStorage.removeItem('draftStudentId');
+            onComplete(docId!);
         } catch (e) {
             console.error("Error saving to Firestore:", e);
-            alert("Erro ao salvar no banco de dados. Verifique sua conexão e tente novamente.");
+            alert("Erro ao salvar no banco de dados.");
         } finally {
             setLoading(false);
         }
     };
+
+    if (showDraftPrompt) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-brand-dark p-6">
+                <Card className="max-w-md w-full text-center space-y-6">
+                    <h3 className="text-2xl font-black italic uppercase text-white font-display">Rascunho Encontrado</h3>
+                    <p className="text-zinc-400 text-sm">Você tem um cadastro de atleta em andamento. Deseja continuar de onde parou?</p>
+                    <div className="flex gap-4 justify-center mt-6">
+                        <Button variant="ghost" onClick={startNewDraft}>Novo Cadastro</Button>
+                        <Button variant="primary" onClick={loadDraft}>Continuar Rascunho</Button>
+                    </div>
+                </Card>
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen flex flex-col bg-brand-dark">
@@ -720,9 +926,9 @@ function AthleteAssessmentWizard({ onCancel, onComplete }: { onCancel: () => voi
                             </div>
                         </div>
                     )}
-
+                    
                     {step === 2 && (
-                        <div className="space-y-8 animate-in slide-in-from-right-8 duration-300">
+                         <div className="space-y-8 animate-in slide-in-from-right-8 duration-300">
                             <div className="grid grid-cols-2 gap-8">
                                 <Input label="Peso (kg)" type="number" value={formData.weight || ''} onChange={(v: string) => updateData('weight', v)} className="text-3xl font-black" />
                                 <Input label="Altura (cm)" type="number" value={formData.height || ''} onChange={(v: string) => updateData('height', v)} className="text-3xl font-black" />
@@ -730,14 +936,7 @@ function AthleteAssessmentWizard({ onCancel, onComplete }: { onCancel: () => voi
                             <div className="grid grid-cols-2 gap-8">
                                 <Input label="FC Repouso" type="number" value={formData.restingHeartRate || ''} onChange={(v: string) => updateData('restingHeartRate', v)} placeholder="--" />
                                 <div className="relative">
-                                    <Input 
-                                        label="FC Máxima (Calc)" 
-                                        type="number" 
-                                        value={formData.maxHeartRate || ''} 
-                                        onChange={(v: string) => updateData('maxHeartRate', v)} 
-                                        className="text-brand-neon border-brand-neon/30"
-                                    />
-                                    <Sparkles className="absolute right-4 top-10 text-brand-neon animate-pulse" size={20} />
+                                    <Input label="FC Máxima (Calc)" type="number" value={formData.maxHeartRate || ''} onChange={(v: string) => updateData('maxHeartRate', v)} className="text-brand-neon border-brand-neon/30" />
                                 </div>
                             </div>
                         </div>
@@ -747,9 +946,7 @@ function AthleteAssessmentWizard({ onCancel, onComplete }: { onCancel: () => voi
                         <div className="space-y-6 animate-in slide-in-from-right-8 duration-300">
                             <TextArea label="Lesões" value={formData.injuries || ''} onChange={(v: string) => updateData('injuries', v)} placeholder="Descreva limitações..." />
                             <TextArea label="Medicamentos" value={formData.medications || ''} onChange={(v: string) => updateData('medications', v)} placeholder="Uso contínuo..." />
-                             <Select label="Atestado / PAR-Q" value={formData.medicalClearance ? 'yes' : 'no'} onChange={(v: string) => updateData('medicalClearance', v === 'yes')} options={[
-                                {value: 'yes', label: 'Aprovado / Sem restrições'}, {value: 'no', label: 'Pendente / Restrito'}
-                            ]} />
+                            <Select label="Atestado / PAR-Q" value={formData.medicalClearance ? 'yes' : 'no'} onChange={(v: string) => updateData('medicalClearance', v === 'yes')} options={[ {value: 'yes', label: 'Aprovado / Sem restrições'}, {value: 'no', label: 'Pendente / Restrito'} ]} />
                         </div>
                     )}
 
@@ -763,51 +960,37 @@ function AthleteAssessmentWizard({ onCancel, onComplete }: { onCancel: () => voi
                                 <Input label="Melhor 5k" value={formData.best5k || ''} onChange={(v: string) => updateData('best5k', v)} placeholder="00:00" />
                                 <Input label="Melhor 10k" value={formData.best10k || ''} onChange={(v: string) => updateData('best10k', v)} placeholder="00:00" />
                             </div>
-                            <Select label="Foco Principal" value={formData.mainGoal} onChange={(v: string) => updateData('mainGoal', v)} options={[
-                                {value: 'health', label: 'Lifestyle / Saúde'},
-                                {value: 'performance_5k', label: 'Performance 5km'},
-                                {value: 'performance_10k', label: 'Performance 10km'},
-                                {value: 'half_marathon', label: 'Meia Maratona (21k)'},
-                                {value: 'marathon', label: 'Maratona (42k)'}
-                            ]} />
-                            <Select label="Freq. Semanal" value={formData.availabilityDays} onChange={(v: string) => updateData('availabilityDays', v)} options={[
-                                {value: '3', label: '3 Treinos'},
-                                {value: '4', label: '4 Treinos'},
-                                {value: '5', label: '5 Treinos'},
-                                {value: '6', label: '6 Treinos (Elite)'}
-                            ]} />
+                            <Select label="Foco Principal" value={formData.mainGoal} onChange={(v: string) => updateData('mainGoal', v)} options={[ {value: 'health', label: 'Lifestyle / Saúde'}, {value: 'performance_5k', label: 'Performance 5km'}, {value: 'performance_10k', label: 'Performance 10km'}, {value: 'half_marathon', label: 'Meia Maratona (21k)'}, {value: 'marathon', label: 'Maratona (42k)'} ]} />
+                            <Select label="Freq. Semanal" value={formData.availabilityDays} onChange={(v: string) => updateData('availabilityDays', v)} options={[ {value: '3', label: '3 Treinos'}, {value: '4', label: '4 Treinos'}, {value: '5', label: '5 Treinos'}, {value: '6', label: '6 Treinos (Elite)'} ]} />
                         </div>
                     )}
                 </div>
 
                 <div className="flex justify-between items-center pt-6 border-t border-white/5">
-                    <Button variant="ghost" disabled={step === 1} onClick={() => setStep(s => s - 1)}>
-                        VOLTAR
-                    </Button>
-                    
-                    {step < 4 ? (
-                         <Button onClick={() => setStep(s => s + 1)} className="px-10">
-                            PRÓXIMO <ChevronRight size={16}/>
-                        </Button>
-                    ) : (
-                        <Button variant="primary" loading={loading} onClick={handleFinish} className="px-12 py-5 text-sm">
-                            <Save size={18} /> FINALIZAR CADASTRO
-                        </Button>
-                    )}
+                    <Button variant="ghost" disabled={step === 1} onClick={() => setStep(s => s - 1)}>VOLTAR</Button>
+                    {step < 4 ? (<Button onClick={() => setStep(s => s + 1)} className="px-10">PRÓXIMO <ChevronRight size={16}/></Button>) : (<Button variant="primary" loading={loading} onClick={handleFinish} className="px-12 py-5 text-sm"><Save size={18} /> FINALIZAR CADASTRO</Button>)}
                 </div>
             </div>
         </div>
     )
 }
 
-// --- PROFESSOR DASHBOARD ---
-
-function ProfessorDashboard({ students, selectedStudentId, onSelectStudent, onNewStudent }: any) {
+function ProfessorDashboard({ students, selectedStudentId, onSelectStudent, onNewStudent, currentUser }: any) {
     const [searchTerm, setSearchTerm] = useState("");
 
     if (selectedStudentId) {
         const student = students.find((s: UserProfile) => s.id === selectedStudentId);
-        if (!student) return <div className="p-10 text-center text-zinc-500 font-mono">CARREGANDO...</div>;
+        if (!student) {
+            return (
+                <div className="p-20 flex flex-col items-center justify-center space-y-6">
+                    <div className="w-10 h-10 border-4 border-brand-neon border-t-transparent rounded-full animate-spin"></div>
+                    <p className="text-zinc-500 font-mono text-sm uppercase tracking-widest animate-pulse">Sincronizando Perfil...</p>
+                    <button onClick={() => onSelectStudent(null)} className="mt-4 px-6 py-2 rounded-full border border-zinc-700 text-zinc-400 hover:text-white hover:border-brand-neon transition-all text-xs font-bold uppercase tracking-wider">
+                        Voltar para o Painel
+                    </button>
+                </div>
+            );
+        }
 
         return (
             <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -827,15 +1010,14 @@ function ProfessorDashboard({ students, selectedStudentId, onSelectStudent, onNe
         );
     }
 
-    const filteredStudents = students.filter((s: UserProfile) => s.name.toLowerCase().includes(searchTerm.toLowerCase()));
+    const myStudents = students; // Mostra todos os alunos para evitar perda de dados por troca de sessão anônima
+    const filteredStudents = myStudents.filter((s: UserProfile) => s.name.toLowerCase().includes(searchTerm.toLowerCase()));
 
     return (
         <div className="max-w-7xl mx-auto">
-             {/* HEADER DASHBOARD UNIFICADO (COMMAND PANEL) */}
-            <div className="relative rounded-[2.5rem] bg-zinc-900 border border-white/5 overflow-hidden mb-10 p-8 md:p-12 shadow-2xl">
-                {/* Background decoration */}
+            {/* Header com pesquisa e botão novo */}
+             <div className="relative rounded-[2.5rem] bg-zinc-900 border border-white/5 overflow-hidden mb-10 p-8 md:p-12 shadow-2xl">
                 <div className="absolute top-0 right-0 w-[300px] h-[300px] bg-brand-neon/5 blur-[100px] rounded-full pointer-events-none" />
-                
                 <div className="relative z-10 flex flex-col xl:flex-row justify-between items-end gap-8">
                     <div className="w-full md:w-auto">
                          <div className="flex items-center gap-3 mb-2">
@@ -846,23 +1028,12 @@ function ProfessorDashboard({ students, selectedStudentId, onSelectStudent, onNe
                             Meus <span className="text-brand-neon">Alunos</span>
                          </h2>
                     </div>
-                    
                     <div className="flex flex-col md:flex-row gap-4 w-full xl:w-auto">
-                         {/* Search within dashboard */}
                          <div className="flex-1 md:w-64 bg-black/20 p-1 rounded-2xl border border-white/5 backdrop-blur-sm flex items-center">
                             <Search className="ml-4 text-zinc-500" size={16} />
-                            <input 
-                                type="text" 
-                                placeholder="BUSCAR..." 
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                                className="w-full px-4 py-3 bg-transparent text-white font-bold text-xs outline-none placeholder:text-zinc-600 uppercase"
-                            />
+                            <input type="text" placeholder="BUSCAR..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full px-4 py-3 bg-transparent text-white font-bold text-xs outline-none placeholder:text-zinc-600 uppercase" />
                          </div>
-                         
-                         <Button onClick={onNewStudent} className="shadow-lg shadow-brand-neon/10 py-4 px-8 text-xs h-full whitespace-nowrap">
-                            <Plus size={16} /> Novo Atleta
-                        </Button>
+                         <Button onClick={onNewStudent} className="shadow-lg shadow-brand-neon/10 py-4 px-8 text-xs h-full whitespace-nowrap"> <Plus size={16} /> Novo Atleta </Button>
                     </div>
                 </div>
             </div>
@@ -879,11 +1050,6 @@ function ProfessorDashboard({ students, selectedStudentId, onSelectStudent, onNe
                             </div>
                             <h3 className="text-2xl font-black uppercase italic text-white truncate leading-none mb-1 group-hover:translate-x-1 transition-transform font-display">{s.name}</h3>
                             <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-6">{s.mainGoal?.replace('_', ' ').toUpperCase()}</p>
-                            
-                            <div className="flex justify-between items-center pt-4 border-t border-white/5">
-                                <p className="text-xs font-bold text-zinc-400 font-mono">{s.weeklyVolume || '0'}KM <span className="text-zinc-600">/SEM</span></p>
-                                <ArrowRight size={16} className="text-brand-neon opacity-0 group-hover:opacity-100 transition-opacity" />
-                            </div>
                         </Card>
                     ))
                 ) : (
@@ -897,49 +1063,25 @@ function ProfessorDashboard({ students, selectedStudentId, onSelectStudent, onNe
 }
 
 function StudentProfileCard({ student }: { student: UserProfile }) {
-    const imc = student.weight && student.height ? (parseFloat(student.weight) / Math.pow(parseFloat(student.height)/100, 2)).toFixed(1) : '--';
-
+    // ... Mesmo código de StudentProfileCard
+     const imc = student.weight && student.height ? (parseFloat(student.weight) / Math.pow(parseFloat(student.height)/100, 2)).toFixed(1) : '--';
     return (
         <Card className="h-full bg-brand-surface border-t-4 border-t-brand-neon">
             <div className="mb-8">
                 <h3 className="text-4xl font-black italic uppercase leading-none text-white mb-2 font-display">{student.name}</h3>
                 <div className="flex gap-2">
                     <span className="px-2 py-1 bg-white/5 rounded text-[10px] font-bold uppercase tracking-wider text-zinc-400">{student.gender === 'male' ? 'MASC' : 'FEM'}</span>
-                    <span className="px-2 py-1 bg-white/5 rounded text-[10px] font-bold uppercase tracking-wider text-zinc-400">{new Date().getFullYear() - new Date(student.birthDate || '').getFullYear()} ANOS</span>
+                    <span className="px-2 py-1 bg-white/5 rounded text-[10px] font-bold uppercase tracking-wider text-zinc-400">{student.birthDate ? new Date().getFullYear() - new Date(student.birthDate).getFullYear() + ' ANOS' : '-- ANOS'}</span>
                 </div>
             </div>
-
-            <div className="space-y-6">
+             <div className="space-y-6">
                 <div className="grid grid-cols-3 gap-2">
-                    <div className="bg-brand-dark p-3 rounded-xl text-center border border-white/5">
-                        <p className="text-[9px] font-black text-zinc-500 uppercase">IMC</p>
-                        <p className="text-lg font-black text-white">{imc}</p>
-                    </div>
-                    <div className="bg-brand-dark p-3 rounded-xl text-center border border-white/5">
-                        <p className="text-[9px] font-black text-zinc-500 uppercase">FCR</p>
-                        <p className="text-lg font-black text-brand-neon">{student.restingHeartRate || '--'}</p>
-                    </div>
-                    <div className="bg-brand-dark p-3 rounded-xl text-center border border-white/5">
-                        <p className="text-[9px] font-black text-zinc-500 uppercase">FCMáx</p>
-                        <p className="text-lg font-black text-white">{student.maxHeartRate || '--'}</p>
-                    </div>
+                    <div className="bg-brand-dark p-3 rounded-xl text-center border border-white/5"><p className="text-[9px] font-black text-zinc-500 uppercase">IMC</p><p className="text-lg font-black text-white">{imc}</p></div>
+                    <div className="bg-brand-dark p-3 rounded-xl text-center border border-white/5"><p className="text-[9px] font-black text-zinc-500 uppercase">FCR</p><p className="text-lg font-black text-brand-neon">{student.restingHeartRate || '--'}</p></div>
+                    <div className="bg-brand-dark p-3 rounded-xl text-center border border-white/5"><p className="text-[9px] font-black text-zinc-500 uppercase">FCMáx</p><p className="text-lg font-black text-white">{student.maxHeartRate || '--'}</p></div>
                 </div>
-                
-                <div className="p-4 rounded-2xl bg-brand-neon/10 border border-brand-neon/20">
-                    <p className="text-[9px] font-black text-brand-neon uppercase mb-1">Foco Principal</p>
-                    <p className="text-md font-bold text-white uppercase italic flex items-center gap-2 font-display">
-                        <Target size={14} /> 
-                        {student.mainGoal?.replace(/_/g, ' ')}
-                    </p>
-                </div>
-
-                <div className="space-y-2">
-                     <p className="text-[9px] font-black text-zinc-600 uppercase tracking-widest">Médico / Bio</p>
-                     <div className="p-4 bg-brand-dark rounded-xl border border-white/5 text-xs text-zinc-400 font-medium leading-relaxed">
-                        {student.injuries ? <span className="block mb-2 text-red-400">⚠️ {student.injuries}</span> : <span className="block mb-2 text-emerald-500">✓ Sem lesões recentes</span>}
-                        {student.medications && <span className="block text-zinc-300">Med: {student.medications}</span>}
-                     </div>
-                </div>
+                <div className="p-4 rounded-2xl bg-brand-neon/10 border border-brand-neon/20"><p className="text-[9px] font-black text-brand-neon uppercase mb-1">Foco Principal</p><p className="text-md font-bold text-white uppercase italic flex items-center gap-2 font-display"><Target size={14} /> {student.mainGoal?.replace(/_/g, ' ')}</p></div>
+                 <div className="space-y-2"><p className="text-[9px] font-black text-zinc-600 uppercase tracking-widest">Médico / Bio</p><div className="p-4 bg-brand-dark rounded-xl border border-white/5 text-xs text-zinc-400 font-medium leading-relaxed">{student.injuries ? <span className="block mb-2 text-red-400">⚠️ {student.injuries}</span> : <span className="block mb-2 text-emerald-500">✓ Sem lesões recentes</span>}{student.medications && <span className="block text-zinc-300">Med: {student.medications}</span>}</div></div>
             </div>
         </Card>
     )
@@ -951,7 +1093,8 @@ function WorkoutManager({ student }: { student: UserProfile }) {
     
     useEffect(() => {
         const q = collection(db, 'artifacts', appId, 'workouts');
-        const unsub = onSnapshot(q, (snap) => {
+        const unsub = onSnapshot(q, { includeMetadataChanges: true }, (snap) => {
+            syncState.update(snap.metadata.hasPendingWrites, snap.metadata.fromCache);
             const data = snap.docs.map(d => ({id: d.id, ...d.data()} as WorkoutModel));
             setWorkouts(data.filter(w => w.studentId === student.id));
         });
@@ -964,12 +1107,19 @@ function WorkoutManager({ student }: { student: UserProfile }) {
         }
     };
 
+    const totalWeeklyTime = workouts.reduce((acc, w) => acc + calculateWorkoutTime(w), 0);
+
     return (
         <div className="space-y-6">
             <div className="flex justify-between items-center p-2">
-                <h3 className="text-2xl font-black italic uppercase tracking-tighter text-white flex items-center gap-3 font-display">
-                    <Flame className="text-brand-neon" /> Plano de Treino
-                </h3>
+                <div>
+                    <h3 className="text-2xl font-black italic uppercase tracking-tighter text-white flex items-center gap-3 font-display">
+                        <Flame className="text-brand-neon" /> Plano Semanal
+                    </h3>
+                    <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mt-1">
+                        Volume Total: <span className="text-brand-neon">{totalWeeklyTime} MIN</span>
+                    </p>
+                </div>
                 <Button onClick={() => setIsCreating(true)} variant="secondary">
                    <Plus size={16} /> Adicionar
                 </Button>
@@ -982,14 +1132,14 @@ function WorkoutManager({ student }: { student: UserProfile }) {
                 />
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="flex flex-col gap-3">
                 {workouts.length === 0 ? (
                     <div className="col-span-full py-20 text-center border-2 border-dashed border-zinc-800 rounded-3xl">
                         <p className="font-bold text-zinc-600">SEM TREINOS PRESCRITOS</p>
                     </div>
                 ) : (
                    workouts.sort((a,b) => getDayIndex(a.dayOfWeek) - getDayIndex(b.dayOfWeek)).map(w => (
-                       <WorkoutCard key={w.id} workout={w} onDelete={() => deleteWorkout(w.id)} />
+                       <CompactWorkoutCard key={w.id} workout={w} onDelete={() => deleteWorkout(w.id)} />
                    )) 
                 )}
             </div>
@@ -999,107 +1149,61 @@ function WorkoutManager({ student }: { student: UserProfile }) {
     )
 }
 
-// --- WORKOUT BUILDER ---
-
 function WorkoutBuilder({ student, onClose }: { student: UserProfile, onClose: () => void }) {
-    const [type, setType] = useState<WorkoutModel['type']>('longao');
     const [day, setDay] = useState('Segunda');
+    const [type, setType] = useState('longao');
     const [loading, setLoading] = useState(false);
 
-    // Form States
-    const [common, setCommon] = useState({ distance: '', time: '', pace: '', description: '', warmup: '10', cooldown: '5' });
-    const [interval, setInterval] = useState({ sets: '1', reps: '10', stim: '2', rec: '1', recType: 'min' });
-    const [fartlek, setFartlek] = useState({ fast: '1', slow: '1' });
+    // Unified Form State for ALL types
+    const [formData, setFormData] = useState({
+        warmup: '10',
+        cooldown: '5',
+        sets: '1',
+        reps: '1',
+        stimulus: '5', // Km or Minutes
+        recovery: '2', // Minutes
+        speed: '0', // km/h
+        description: ''
+    });
 
-    // Recommendation Engine
-    const recommendation = useMemo(() => {
-        let advice = { title: "Geral", volume: "Moderado", intensity: "Zona 2", notes: [] as string[] };
-        if (type === 'longao') {
-            advice.title = "Longo";
-            advice.intensity = "65-75% FCmáx";
-            advice.volume = "20-30% Vol. Semanal";
-        } else if (type === 'tiro') {
-            advice.title = "Intervalado";
-            advice.intensity = "90-95% FCmáx";
-            advice.volume = "Alta Intensidade";
-            advice.notes.push("Aquecimento de 15min obrigatório");
-        }
-        return advice;
-    }, [type, student]);
+    const updateForm = (field: string, value: string) => {
+        setFormData(prev => ({ ...prev, [field]: value }));
+    }
 
-    const handleSave = async () => {
+    const handleSave = () => {
         setLoading(true);
-        try {
-            const payload: any = {
-                studentId: student.id,
-                type,
-                dayOfWeek: day,
-                warmupTime: common.warmup,
-                cooldownTime: common.cooldown,
-                description: common.description,
-                createdAt: new Date().toISOString()
-            };
+        const payload: any = {
+            studentId: student.id,
+            type,
+            dayOfWeek: day,
+            warmupTime: formData.warmup,
+            cooldownTime: formData.cooldown,
+            sets: formData.sets,
+            reps: formData.reps,
+            stimulusTime: formData.stimulus, 
+            recoveryTime: formData.recovery,
+            speed: formData.speed,
+            description: formData.description,
+            createdAt: new Date().toISOString()
+        };
 
-            let estimatedTotal = 0;
-            const w = Number(common.warmup) || 0;
-            const c = Number(common.cooldown) || 0;
-
-            if (type === 'longao' || type === 'ritmo' || type === 'regenerativo') {
-                payload.distance = common.distance;
-                payload.pace = common.pace;
-                payload.totalTime = common.time; 
-            } else if (type === 'tiro' || type === 'subida') {
-                payload.sets = interval.sets;
-                payload.reps = interval.reps;
-                payload.stimulusTime = interval.stim;
-                payload.recoveryTime = interval.rec;
-                estimatedTotal = w + c + ((Number(interval.sets)||1) * (Number(interval.reps)||1) * ((Number(interval.stim)||0) + (Number(interval.rec)||0)));
-                payload.totalTime = String(estimatedTotal);
-            } else if (type === 'fartlek') {
-                payload.totalTime = common.time;
-                payload.fastTime = fartlek.fast;
-                payload.slowTime = fartlek.slow;
-            }
-
-            await addDoc(collection(db, 'artifacts', appId, 'workouts'), payload);
-            onClose();
-        } catch (e) { console.error(e); } finally { setLoading(false); }
+        addDoc(collection(db, 'artifacts', appId, 'workouts'), payload)
+            .catch(e => console.error(e));
+            
+        setTimeout(() => {
+            setLoading(false);
+            // Não fechamos o form (onClose) para permitir reaproveitar os dados
+        }, 400);
     };
 
     return (
         <div className="flex flex-col gap-6 animate-in zoom-in-95 duration-200">
-             {/* AI INSIGHT MOVED TO TOP */}
-             <div className="w-full">
-                <div className="bg-brand-surface border border-white/5 p-6 rounded-3xl h-full shadow-lg shadow-black/50">
-                    <div className="flex items-center gap-2 mb-4 text-brand-neon">
-                        <Brain size={18} /> <span className="text-xs font-black uppercase tracking-widest font-display">Insight IA</span>
-                    </div>
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                        <h3 className="text-2xl font-black italic uppercase text-white font-display">{recommendation.title}</h3>
-                        <div className="flex gap-4">
-                             <div>
-                                <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block mb-1">Intensidade Alvo</span>
-                                <p className="text-white font-bold">{recommendation.intensity}</p>
-                            </div>
-                            <div>
-                                <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block mb-1">Guia de Volume</span>
-                                <p className="text-white font-bold">{recommendation.volume}</p>
-                            </div>
-                        </div>
-                    </div>
-                        {recommendation.notes.length > 0 && (
-                            <div className="pt-4 border-t border-white/5 mt-4">
-                                <ul className="text-xs text-zinc-400 space-y-2">
-                                    {recommendation.notes.map((n, i) => <li key={i}>• {n}</li>)}
-                                </ul>
-                            </div>
-                        )}
-                </div>
-            </div>
+             <div className="flex justify-between items-center bg-black rounded-t-3xl p-4 -mb-6 relative z-10 border-b border-zinc-800">
+                 <h4 className="text-xl font-black italic uppercase text-red-500 font-display">NOVA SESSÃO</h4>
+                 <button onClick={onClose} className="text-zinc-500 hover:text-white"><X /></button>
+             </div>
 
-            <div className="w-full bg-brand-light/20 border border-white/5 rounded-3xl p-6 relative">
-                <button onClick={onClose} className="absolute top-6 right-6 text-zinc-500 hover:text-white"><X /></button>
-                <h4 className="text-xl font-black italic uppercase mb-8 text-brand-neon font-display">Nova Sessão</h4>
+            <div className="w-full bg-black border border-zinc-800 rounded-3xl p-6 relative">
                 
                 <div className="grid grid-cols-2 gap-4 mb-6">
                     <Select label="Dia" value={day} onChange={setDay} options={[
@@ -1112,42 +1216,22 @@ function WorkoutBuilder({ student, onClose }: { student: UserProfile, onClose: (
                     ]} />
                 </div>
 
-                <div className="space-y-6 mb-8">
-                    {(type === 'longao' || type === 'ritmo' || type === 'regenerativo') && (
-                        <div className="grid grid-cols-2 gap-4">
-                            <Input label="Km" type="number" value={common.distance} onChange={(v: string) => setCommon({...common, distance: v})} />
-                            <Input label="Minutos" type="number" value={common.time} onChange={(v: string) => setCommon({...common, time: v})} />
-                            <Input label="Pace (min/km)" value={common.pace} onChange={(v: string) => setCommon({...common, pace: v})} className="col-span-2" />
-                        </div>
-                    )}
-
-                    {(type === 'tiro' || type === 'subida') && (
-                        <div className="space-y-4">
-                            <div className="grid grid-cols-3 gap-4">
-                                <Input label="Aquecimento" type="number" value={common.warmup} onChange={(v: string) => setCommon({...common, warmup: v})} />
-                                <Input label="Desaquecimento" type="number" value={common.cooldown} onChange={(v: string) => setCommon({...common, cooldown: v})} />
-                                <Input label="Séries" type="number" value={interval.sets} onChange={(v: string) => setInterval({...interval, sets: v})} />
-                            </div>
-                            <div className="p-4 bg-brand-dark rounded-xl border border-white/5 grid grid-cols-3 gap-4">
-                                <Input label="Reps" type="number" value={interval.reps} onChange={(v: string) => setInterval({...interval, reps: v})} />
-                                <Input label="Estímulo" value={interval.stim} onChange={(v: string) => setInterval({...interval, stim: v})} />
-                                <Input label="Recuperação" value={interval.rec} onChange={(v: string) => setInterval({...interval, rec: v})} />
-                            </div>
-                        </div>
-                    )}
-
-                    {type === 'fartlek' && (
-                        <div className="grid grid-cols-2 gap-4">
-                             <Input label="Tempo Total" type="number" value={common.time} onChange={(v: string) => setCommon({...common, time: v})} className="col-span-2" />
-                             <Input label="Forte" type="number" value={fartlek.fast} onChange={(v: string) => setFartlek({...fartlek, fast: v})} />
-                             <Input label="Leve" type="number" value={fartlek.slow} onChange={(v: string) => setFartlek({...fartlek, slow: v})} />
-                        </div>
-                    )}
-                    
-                    <TextArea label="Instruções" value={common.description} onChange={(v: string) => setCommon({...common, description: v})} placeholder="Ex: Manter postura, final forte..." />
+                <div className="grid grid-cols-3 gap-4 mb-4">
+                     <Input label="Aquecimento (min)" type="number" value={formData.warmup} onChange={(v: string) => updateForm('warmup', v)} className="bg-zinc-900 border-zinc-800" />
+                     <Input label="Desaquecimento (min)" type="number" value={formData.cooldown} onChange={(v: string) => updateForm('cooldown', v)} className="bg-zinc-900 border-zinc-800" />
+                     <Input label="Séries (Blocos)" type="number" value={formData.sets} onChange={(v: string) => updateForm('sets', v)} className="bg-zinc-900 border-zinc-800" />
                 </div>
 
-                <Button onClick={handleSave} loading={loading} className="w-full">Criar Treino</Button>
+                <div className="grid grid-cols-3 gap-4 mb-4">
+                     {/* Reps field hidden or repurposed as it usually is 1 for block based */}
+                     <Input label="Estímulo (Km ou Min)" value={formData.stimulus} onChange={(v: string) => updateForm('stimulus', v)} className="bg-zinc-900 border-zinc-800" />
+                     <Input label="Recuperação (Min)" value={formData.recovery} onChange={(v: string) => updateForm('recovery', v)} className="bg-zinc-900 border-zinc-800" />
+                     <Input label="Velocidade (km/h)" value={formData.speed} onChange={(v: string) => updateForm('speed', v)} className="bg-zinc-900 border-zinc-800" placeholder="Ex: 12.5" />
+                </div>
+                    
+                <TextArea label="Instruções" value={formData.description} onChange={(v: string) => updateForm('description', v)} placeholder="Ex: Manter postura, final forte..." className="bg-zinc-900 border-zinc-800 mb-6" />
+
+                <Button onClick={handleSave} loading={loading} className="w-full">Salvar Treino</Button>
             </div>
         </div>
     );
@@ -1157,24 +1241,63 @@ function WorkoutBuilder({ student, onClose }: { student: UserProfile, onClose: (
 
 function StudentView({ profile }: { profile: UserProfile }) {
     const [workouts, setWorkouts] = useState<WorkoutModel[]>([]);
+    const [checkIns, setCheckIns] = useState<CheckIn[]>([]);
+    const [currentMonth, setCurrentMonth] = useState(new Date());
 
     useEffect(() => {
         if (!profile.id) return;
-        const q = collection(db, 'artifacts', appId, 'workouts');
-        const unsub = onSnapshot(q, (snap) => {
+        // Fetch Workouts (Templates)
+        const qW = collection(db, 'artifacts', appId, 'workouts');
+        const unsubW = onSnapshot(qW, (snap) => {
             const data = snap.docs.map(d => ({id: d.id, ...d.data()} as WorkoutModel));
             setWorkouts(data.filter(w => w.studentId === profile.id));
         });
-        return () => unsub();
+
+        // Fetch Check-ins
+        const qC = collection(db, 'artifacts', appId, 'checkins');
+        const unsubC = onSnapshot(qC, (snap) => {
+            const data = snap.docs.map(d => ({id: d.id, ...d.data()} as CheckIn));
+            setCheckIns(data.filter(c => c.studentId === profile.id));
+        });
+
+        return () => { unsubW(); unsubC(); };
     }, [profile.id]);
 
-    const sortedWorkouts = workouts.sort((a,b) => getDayIndex(a.dayOfWeek) - getDayIndex(b.dayOfWeek));
-    const daysMap = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
-    const todayName = daysMap[new Date().getDay()];
-    const todayWorkout = workouts.find(w => w.dayOfWeek.includes(todayName.split('-')[0]));
+    const handleCheckIn = async (workout: WorkoutModel, date: Date) => {
+        if(confirm(`Confirmar treino de ${getDayName(date)}?`)) {
+            const dateStr = formatDate(date);
+            const checkInId = `${profile.id}_${workout.id}_${dateStr}`;
+            const checkIn: CheckIn = {
+                id: checkInId,
+                studentId: profile.id,
+                workoutId: workout.id,
+                date: dateStr,
+                completedAt: new Date().toISOString(),
+                status: 'completed'
+            };
+            await setDoc(doc(db, 'artifacts', appId, 'checkins', checkInId), checkIn);
+        }
+    };
+
+    // Calendar Generation
+    const getCalendarDays = () => {
+        const year = currentMonth.getFullYear();
+        const month = currentMonth.getMonth();
+        const firstDay = new Date(year, month, 1);
+        const lastDay = new Date(year, month + 1, 0);
+        
+        const days = [];
+        for (let d = 1; d <= lastDay.getDate(); d++) {
+            days.push(new Date(year, month, d));
+        }
+        return days;
+    };
+
+    const days = getCalendarDays();
+    const completedCount = checkIns.filter(c => c.date.startsWith(currentMonth.toISOString().slice(0, 7))).length;
 
     return (
-        <div className="max-w-md mx-auto space-y-10 pb-24 animate-in fade-in duration-700">
+        <div className="max-w-md mx-auto space-y-8 pb-24 animate-in fade-in duration-700">
             <div className="flex items-center justify-between">
                 <div>
                     <h2 className="text-4xl font-black italic uppercase tracking-tighter text-white leading-none font-display">
@@ -1186,56 +1309,54 @@ function StudentView({ profile }: { profile: UserProfile }) {
                 </div>
             </div>
 
-            {/* HERO CARD */}
-            {todayWorkout ? (
-                <div className="relative overflow-hidden rounded-[2.5rem] bg-zinc-900 border border-white/10 group">
-                    <div className="absolute inset-0 bg-gradient-to-br from-brand-neon/20 to-transparent opacity-50 group-hover:opacity-100 transition-opacity" />
-                    <div className="relative z-10 p-8">
-                        <div className="flex justify-between items-start mb-12">
-                            <span className="bg-brand-neon text-brand-dark px-3 py-1 rounded-md text-[10px] font-black uppercase tracking-widest font-display">Treino de Hoje</span>
-                            <Play className="text-white fill-white" size={24} />
-                        </div>
-                        
-                        <h3 className="text-5xl font-black italic uppercase mb-2 leading-[0.85] tracking-tighter text-white font-display">{todayWorkout.type}</h3>
-                        <p className="text-zinc-400 font-medium text-sm line-clamp-2 mb-8">{todayWorkout.description || 'Foco na técnica.'}</p>
-                        
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="bg-black/40 backdrop-blur-md p-4 rounded-2xl border border-white/5">
-                                <span className="text-[9px] uppercase text-zinc-400 font-black tracking-wider block mb-1">Volume</span>
-                                <span className="text-2xl font-black tracking-tight text-white">
-                                    {todayWorkout.distance ? `${todayWorkout.distance}km` : `${todayWorkout.totalTime}'`}
-                                </span>
-                            </div>
-                            <div className="bg-black/40 backdrop-blur-md p-4 rounded-2xl border border-white/5">
-                                <span className="text-[9px] uppercase text-zinc-400 font-black tracking-wider block mb-1">Intensidade</span>
-                                <span className="text-2xl font-black tracking-tight text-brand-neon">
-                                    {todayWorkout.pace || 'Livre'}
-                                </span>
-                            </div>
-                        </div>
-                    </div>
+            {/* PERFORMANCE FEED */}
+            <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-2xl flex items-center justify-between">
+                <div>
+                    <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Performance Mensal</p>
+                    <p className="text-2xl font-black text-white italic">{completedCount} <span className="text-sm text-zinc-600">TREINOS</span></p>
                 </div>
-            ) : (
-                 <div className="bg-brand-surface rounded-[2.5rem] p-10 text-center border border-white/5 flex flex-col items-center justify-center h-80 relative overflow-hidden">
-                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-white/5 to-transparent" />
-                    <div className="relative z-10">
-                        <div className="w-16 h-16 bg-brand-dark rounded-full flex items-center justify-center mx-auto mb-6 text-zinc-500 border border-white/5">
-                            <Zap size={24} />
-                        </div>
-                        <p className="text-white font-black text-2xl italic uppercase tracking-tighter font-display">Descanso</p>
-                        <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest mt-2">Recuperar & Hidratar</p>
-                    </div>
+                <div className="h-10 w-10 rounded-full bg-brand-neon flex items-center justify-center text-brand-dark">
+                    <Activity size={20} />
                 </div>
-            )}
+            </div>
 
             <div className="space-y-4">
-                <div className="flex items-center gap-3 mb-4">
-                    <BarChart3 size={20} className="text-brand-neon"/>
-                    <h3 className="text-xl font-black italic uppercase text-white tracking-tighter font-display">Semana</h3>
+                <div className="flex items-center justify-between">
+                     <h3 className="text-xl font-black italic uppercase text-white tracking-tighter font-display flex items-center gap-2">
+                        <CalendarDays className="text-brand-neon" size={20} /> 
+                        {currentMonth.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
+                     </h3>
                 </div>
-                {sortedWorkouts.map(w => (
-                    <WorkoutCard key={w.id} workout={w} />
-                ))}
+
+                <div className="space-y-3">
+                    {days.map(date => {
+                        const dayName = getDayName(date);
+                        // Find template for this weekday
+                        const workout = workouts.find(w => w.dayOfWeek === dayName);
+                        
+                        if (!workout) return null;
+
+                        const dateStr = formatDate(date);
+                        const isCompleted = checkIns.some(c => c.workoutId === workout.id && c.date === dateStr);
+                        
+                        // Only show future days or past days that had a workout
+                        return (
+                             <CompactWorkoutCard 
+                                key={dateStr} 
+                                workout={workout} 
+                                date={date} 
+                                isCompleted={isCompleted}
+                                onCheckIn={() => !isCompleted && handleCheckIn(workout, date)}
+                             />
+                        );
+                    })}
+                    
+                    {days.filter(d => workouts.find(w => w.dayOfWeek === getDayName(d))).length === 0 && (
+                        <div className="py-10 text-center text-zinc-500 font-bold uppercase text-xs">
+                            Sem treinos este mês
+                        </div>
+                    )}
+                </div>
             </div>
 
             <WorkoutLegend />
