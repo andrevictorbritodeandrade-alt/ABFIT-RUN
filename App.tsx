@@ -474,6 +474,245 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const seedAndre = async () => {
+      try {
+        const q = collection(db, 'artifacts', appId, 'users');
+        const snap = await getDocs(q);
+        const allUsers = snap.docs.map(d => ({ id: d.id, ...d.data() } as UserProfile));
+        let andre = allUsers.find(s => s.name.toLowerCase().includes('andré brito') || s.name.toLowerCase().includes('andre brito'));
+        
+        if (!andre) {
+          const andreData = {
+            name: 'André Brito',
+            phone: '11999999999',
+            role: 'student',
+            anamnesisComplete: true,
+            gender: 'male',
+            birthDate: '1989-01-01', // 36 years old
+            weight: '90', // IMC 30.6 -> height 171
+            height: '171',
+            restingHeartRate: '75',
+            maxHeartRate: '184',
+            mainGoal: 'health',
+            injuries: '⚠️ Patela esquerda já saiu do lugar 4 vezes em um intervalo de 14 meses.',
+            medications: 'BUP, Venvanse, Vitaminas bariátricas, Topiramato, Sertralina',
+            weeklyVolume: '250',
+            createdAt: new Date().toISOString()
+          };
+          const docRef = await addDoc(collection(db, 'artifacts', appId, 'users'), andreData);
+          andre = { id: docRef.id, ...andreData } as UserProfile;
+        }
+        
+        const wq = collection(db, 'artifacts', appId, 'workouts');
+        const wsnap = await getDocs(wq);
+        const workouts = wsnap.docs.map(d => ({id: d.id, ...d.data()} as WorkoutModel));
+        const andreWorkouts = workouts.filter(w => w.studentId === andre!.id);
+        
+        if (andreWorkouts.length === 0) {
+          const newWorkouts = [
+            {
+              studentId: andre!.id,
+              type: 'regenerativo',
+              dayOfWeek: 'Segunda',
+              warmupTime: '10',
+              cooldownTime: '10',
+              sets: '10',
+              reps: '1',
+              stimulusTime: '1',
+              recoveryTime: '2',
+              speed: '9',
+              description: '',
+              createdAt: new Date().toISOString()
+            },
+            {
+              studentId: andre!.id,
+              type: 'longao',
+              dayOfWeek: 'Terça',
+              warmupTime: '10',
+              cooldownTime: '10',
+              sets: '1',
+              reps: '1',
+              stimulusTime: '30',
+              recoveryTime: '0',
+              speed: '6',
+              description: 'Caminhada contínua forte',
+              createdAt: new Date().toISOString()
+            },
+            {
+              studentId: andre!.id,
+              type: 'ritmo',
+              dayOfWeek: 'Quarta',
+              warmupTime: '10',
+              cooldownTime: '10',
+              sets: '6',
+              reps: '1',
+              stimulusTime: '3',
+              recoveryTime: '3',
+              speed: '8',
+              description: '',
+              createdAt: new Date().toISOString()
+            },
+            {
+              studentId: andre!.id,
+              type: 'longao',
+              dayOfWeek: 'Quinta',
+              warmupTime: '10',
+              cooldownTime: '10',
+              sets: '1',
+              reps: '1',
+              stimulusTime: '30',
+              recoveryTime: '0',
+              speed: '6',
+              description: 'Caminhada contínua forte',
+              createdAt: new Date().toISOString()
+            },
+            {
+              studentId: andre!.id,
+              type: 'tiro',
+              dayOfWeek: 'Sexta',
+              warmupTime: '10',
+              cooldownTime: '10',
+              sets: '8',
+              reps: '1',
+              stimulusTime: '2',
+              recoveryTime: '1',
+              speed: '8',
+              description: '',
+              createdAt: new Date().toISOString()
+            }
+          ];
+          for (const w of newWorkouts) {
+            await addDoc(collection(db, 'artifacts', appId, 'workouts'), w);
+          }
+        }
+      } catch (e) {
+        console.error("Error seeding Andre Brito:", e);
+      }
+    };
+    
+    const seedMarcelly = async () => {
+      try {
+        const q = collection(db, 'artifacts', appId, 'users');
+        const snap = await getDocs(q);
+        const allUsers = snap.docs.map(d => ({ id: d.id, ...d.data() } as UserProfile));
+        let marcelly = allUsers.find(s => s.name.toLowerCase().includes('marcelly bispo'));
+        
+        if (!marcelly) {
+          const marcellyData = {
+            name: 'Marcelly Bispo',
+            phone: '11988888888',
+            role: 'student',
+            anamnesisComplete: true,
+            gender: 'female',
+            birthDate: '1992-01-01', // 34 years old
+            weight: '58.5', // IMC 21.5 -> height 165
+            height: '165',
+            restingHeartRate: '75',
+            maxHeartRate: '192',
+            mainGoal: 'health',
+            injuries: '',
+            medications: '',
+            weeklyVolume: '150',
+            createdAt: new Date().toISOString()
+          };
+          const docRef = await addDoc(collection(db, 'artifacts', appId, 'users'), marcellyData);
+          marcelly = { id: docRef.id, ...marcellyData } as UserProfile;
+        }
+        
+        const wq = collection(db, 'artifacts', appId, 'workouts');
+        const wsnap = await getDocs(wq);
+        const workouts = wsnap.docs.map(d => ({id: d.id, ...d.data()} as WorkoutModel));
+        const marcellyWorkouts = workouts.filter(w => w.studentId === marcelly!.id);
+        
+        if (marcellyWorkouts.length === 0) {
+          const newWorkouts = [
+            {
+              studentId: marcelly!.id,
+              type: 'tiro', // Intervalado
+              dayOfWeek: 'Segunda',
+              warmupTime: '10',
+              cooldownTime: '5',
+              sets: '5',
+              reps: '1',
+              stimulusTime: '1',
+              recoveryTime: '2',
+              speed: '8',
+              description: '',
+              createdAt: new Date().toISOString()
+            },
+            {
+              studentId: marcelly!.id,
+              type: 'longao',
+              dayOfWeek: 'Terça',
+              warmupTime: '5',
+              cooldownTime: '5',
+              sets: '1',
+              reps: '1',
+              stimulusTime: '20',
+              recoveryTime: '0',
+              speed: '6',
+              description: 'Caminhada contínua forte',
+              createdAt: new Date().toISOString()
+            },
+            {
+              studentId: marcelly!.id,
+              type: 'tiro', // Intervalado
+              dayOfWeek: 'Quarta',
+              warmupTime: '10',
+              cooldownTime: '5',
+              sets: '5',
+              reps: '1',
+              stimulusTime: '1',
+              recoveryTime: '2',
+              speed: '8',
+              description: '',
+              createdAt: new Date().toISOString()
+            },
+            {
+              studentId: marcelly!.id,
+              type: 'longao',
+              dayOfWeek: 'Quinta',
+              warmupTime: '5',
+              cooldownTime: '5',
+              sets: '1',
+              reps: '1',
+              stimulusTime: '20',
+              recoveryTime: '0',
+              speed: '6',
+              description: 'Caminhada contínua forte',
+              createdAt: new Date().toISOString()
+            },
+            {
+              studentId: marcelly!.id,
+              type: 'tiro', // Intervalado
+              dayOfWeek: 'Sexta',
+              warmupTime: '10',
+              cooldownTime: '5',
+              sets: '5',
+              reps: '1',
+              stimulusTime: '1',
+              recoveryTime: '2',
+              speed: '8',
+              description: '',
+              createdAt: new Date().toISOString()
+            }
+          ];
+          for (const w of newWorkouts) {
+            await addDoc(collection(db, 'artifacts', appId, 'workouts'), w);
+          }
+        }
+      } catch (e) {
+        console.error("Error seeding Marcelly Bispo:", e);
+      }
+    };
+    
+    if (currentUser) {
+      seedAndre();
+      seedMarcelly();
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
     try {
       const q = collection(db, 'artifacts', appId, 'users');
       const unsub = onSnapshot(q, { includeMetadataChanges: true }, (snap) => {
