@@ -36,7 +36,7 @@ const auth = getAuth(app); // Autenticação
 const db = getFirestore(app); // Banco de Dados em Tempo Real
 
 // ID da coleção raiz para separar dados desta versão do app
-const appId = 'runtrack-elite-v5'; // Bumped version for new data structure safety
+const appId = 'runtrack-elite-v2';
 
 // --- CUSTOM ICONS (SVG) ---
 
@@ -235,9 +235,9 @@ const calculateWorkoutTime = (w: WorkoutModel, prog?: any) => {
     if (stimVal) {
         if (!isNaN(Number(stimVal))) {
             stimulusTime = Number(stimVal);
-        } else if (stimVal.toLowerCase().includes('km')) {
+        } else if (typeof stimVal === 'string' && stimVal.toLowerCase().includes('km')) {
             const dist = parseFloat(stimVal.replace(',', '.'));
-            const speed = parseFloat(speedVal?.replace(',', '.') || '0');
+            const speed = parseFloat(typeof speedVal === 'string' ? speedVal.replace(',', '.') : '0');
             if (speed > 0 && !isNaN(dist)) {
                 stimulusTime = (dist / speed) * 60;
             }
@@ -320,13 +320,13 @@ const CompactWorkoutCard: React.FC<{
         let newStimulus = workout.stimulusTime;
 
         // Apply to speed if numeric
-        if (workout.speed && !isNaN(parseFloat(workout.speed.replace(',','.')))) {
+        if (workout.speed && typeof workout.speed === 'string' && !isNaN(parseFloat(workout.speed.replace(',','.')))) {
              const val = parseFloat(workout.speed.replace(',','.'));
              newSpeed = (val * (1 + increasePercentage)).toFixed(1).replace('.', ',');
         }
 
         // Apply to stimulus time if purely numeric (minutes)
-        if (workout.stimulusTime && !isNaN(parseFloat(workout.stimulusTime))) {
+        if (workout.stimulusTime && typeof workout.stimulusTime === 'string' && !isNaN(parseFloat(workout.stimulusTime))) {
              const val = parseFloat(workout.stimulusTime);
              newStimulus = Math.round(val * (1 + increasePercentage)).toString();
         }
@@ -381,22 +381,22 @@ const CompactWorkoutCard: React.FC<{
             <div className="flex flex-col gap-3 text-sm font-sans tracking-tight text-zinc-300 leading-relaxed bg-zinc-900/50 p-4 rounded-xl border border-white/5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
-                        <span className="font-bold text-white whitespace-nowrap">{workout.warmupTime}' AQ</span>
+                        <span className="font-bold text-white whitespace-nowrap">{workout.warmupTime || '0'}' AQ</span>
                         <span className="text-red-600 font-bold">+</span>
                     </div>
                     
                     <div className="flex items-center gap-2 bg-black/40 px-3 py-1.5 rounded-lg border border-white/5 flex-1 justify-center min-w-[200px]">
-                        <span className="font-bold text-white">{workout.sets}x</span>
+                        <span className="font-bold text-white">{workout.sets || '1'}x</span>
                         <span className="text-zinc-500 text-[10px] uppercase font-bold tracking-wider">blocos</span>
-                        <span className="text-white font-bold whitespace-nowrap">{prog.stimulus} {isNaN(Number(prog.stimulus)) ? '' : "'"} CO</span>
+                        <span className="text-white font-bold whitespace-nowrap">{prog.stimulus || '0'} {isNaN(Number(prog.stimulus)) ? '' : "'"} CO</span>
                         {prog.speed && prog.speed !== '0' && <span className="text-brand-neon text-xs font-bold">@{prog.speed}km/h</span>}
                         <span className="text-zinc-500 font-bold">:</span>
-                        <span className="text-zinc-400 whitespace-nowrap font-bold">{workout.recoveryTime}' REC</span>
+                        <span className="text-zinc-400 whitespace-nowrap font-bold">{workout.recoveryTime || '0'}' REC</span>
                     </div>
 
                     <div className="flex items-center gap-2">
                         <span className="text-red-600 font-bold">+</span>
-                        <span className="font-bold text-white whitespace-nowrap">{workout.cooldownTime}' DES</span>
+                        <span className="font-bold text-white whitespace-nowrap">{workout.cooldownTime || '0'}' DES</span>
                     </div>
                 </div>
                 
@@ -474,12 +474,19 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!currentUser) return;
+
     const seedAndre = async () => {
       try {
-        const q = collection(db, 'artifacts', appId, 'users');
+        const q = query(collection(db, 'artifacts', appId, 'users'), where('name', '==', 'André Brito'));
         const snap = await getDocs(q);
-        const allUsers = snap.docs.map(d => ({ id: d.id, ...d.data() } as UserProfile));
-        let andre = allUsers.find(s => s.name.toLowerCase().includes('andré brito') || s.name.toLowerCase().includes('andre brito'));
+        let andre = snap.docs.length > 0 ? { id: snap.docs[0].id, ...snap.docs[0].data() } as UserProfile : undefined;
+        
+        if (!andre) {
+          const q2 = query(collection(db, 'artifacts', appId, 'users'), where('name', '==', 'Andre Brito'));
+          const snap2 = await getDocs(q2);
+          andre = snap2.docs.length > 0 ? { id: snap2.docs[0].id, ...snap2.docs[0].data() } as UserProfile : undefined;
+        }
         
         if (!andre) {
           const andreData = {
@@ -592,40 +599,54 @@ export default function App() {
     
     const seedMarcelly = async () => {
       try {
-        const q = collection(db, 'artifacts', appId, 'users');
+        const q = query(collection(db, 'artifacts', appId, 'users'), where('name', '==', 'Marcelly Bispo'));
         const snap = await getDocs(q);
-        const allUsers = snap.docs.map(d => ({ id: d.id, ...d.data() } as UserProfile));
-        let marcelly = allUsers.find(s => s.name.toLowerCase().includes('marcelly bispo'));
+        let marcelly = snap.docs.length > 0 ? { id: snap.docs[0].id, ...snap.docs[0].data() } as UserProfile : undefined;
         
+        let marcellyWorkouts: WorkoutModel[] = [];
+        if (marcelly) {
+            const wq = query(collection(db, 'artifacts', appId, 'workouts'), where('studentId', '==', marcelly.id));
+            const wsnap = await getDocs(wq);
+            marcellyWorkouts = wsnap.docs.map(d => ({id: d.id, ...d.data()} as WorkoutModel));
+        }
+
+        // Verifica se precisa atualizar (se não existe, se o peso está errado, ou se tem menos de 5 treinos)
+        const needsUpdate = !marcelly || marcelly.weight !== '58.5' || marcelly.restingHeartRate !== '75' || marcellyWorkouts.length < 5;
+
+        if (!needsUpdate) return;
+
+        const marcellyData = {
+          name: 'Marcelly Bispo',
+          phone: marcelly ? marcelly.phone : '11988888888',
+          role: 'student',
+          anamnesisComplete: true,
+          gender: 'female',
+          birthDate: '1990-01-01', // 34 years old in 2024/2026
+          weight: '58.5', // IMC 21.5 -> height 165
+          height: '165',
+          restingHeartRate: '75',
+          maxHeartRate: '192',
+          mainGoal: 'health',
+          injuries: 'Nada',
+          medications: 'Nada',
+          weeklyVolume: '150',
+          createdAt: marcelly ? marcelly.createdAt : new Date().toISOString()
+        };
+
         if (!marcelly) {
-          const marcellyData = {
-            name: 'Marcelly Bispo',
-            phone: '11988888888',
-            role: 'student',
-            anamnesisComplete: true,
-            gender: 'female',
-            birthDate: '1992-01-01', // 34 years old
-            weight: '58.5', // IMC 21.5 -> height 165
-            height: '165',
-            restingHeartRate: '75',
-            maxHeartRate: '192',
-            mainGoal: 'health',
-            injuries: '',
-            medications: '',
-            weeklyVolume: '150',
-            createdAt: new Date().toISOString()
-          };
           const docRef = await addDoc(collection(db, 'artifacts', appId, 'users'), marcellyData);
           marcelly = { id: docRef.id, ...marcellyData } as UserProfile;
+        } else {
+          await setDoc(doc(db, 'artifacts', appId, 'users', marcelly.id), marcellyData, { merge: true });
+          marcelly = { id: marcelly.id, ...marcellyData } as UserProfile;
         }
         
-        const wq = collection(db, 'artifacts', appId, 'workouts');
-        const wsnap = await getDocs(wq);
-        const workouts = wsnap.docs.map(d => ({id: d.id, ...d.data()} as WorkoutModel));
-        const marcellyWorkouts = workouts.filter(w => w.studentId === marcelly!.id);
+        // Delete old workouts to avoid duplicates
+        for (const w of marcellyWorkouts) {
+          await deleteDoc(doc(db, 'artifacts', appId, 'workouts', w.id));
+        }
         
-        if (marcellyWorkouts.length === 0) {
-          const newWorkouts = [
+        const newWorkouts = [
             {
               studentId: marcelly!.id,
               type: 'tiro', // Intervalado
@@ -700,16 +721,13 @@ export default function App() {
           for (const w of newWorkouts) {
             await addDoc(collection(db, 'artifacts', appId, 'workouts'), w);
           }
-        }
       } catch (e) {
         console.error("Error seeding Marcelly Bispo:", e);
       }
     };
     
-    if (currentUser) {
-      seedAndre();
-      seedMarcelly();
-    }
+    seedAndre();
+    seedMarcelly();
   }, [currentUser]);
 
   useEffect(() => {
@@ -910,23 +928,8 @@ function LoginScreen({ onSelectProfessor, onSelectStudent, installPrompt, onInst
 
 function StudentLoginList({ students, onLogin, onBack }: { students: UserProfile[], onLogin: (p: UserProfile) => void, onBack: () => void }) {
     const [searchTerm, setSearchTerm] = useState("");
-    const [selectedForAuth, setSelectedForAuth] = useState<UserProfile | null>(null);
-    const [phoneInput, setPhoneInput] = useState("");
-    const [error, setError] = useState("");
 
     const filtered = students.filter(s => s.name.toLowerCase().includes(searchTerm.toLowerCase()));
-
-    const handleAuth = () => {
-        if (!selectedForAuth) return;
-        const storedPhone = selectedForAuth.phone.replace(/\D/g, '');
-        const inputPhone = phoneInput.replace(/\D/g, '');
-
-        if (storedPhone === inputPhone && inputPhone.length > 5) {
-            onLogin(selectedForAuth);
-        } else {
-            setError("Número incorreto.");
-        }
-    }
 
     return (
         <div className="max-w-2xl mx-auto pt-10">
@@ -937,8 +940,8 @@ function StudentLoginList({ students, onLogin, onBack }: { students: UserProfile
                 <h2 className="text-4xl font-black uppercase italic tracking-tighter text-white font-display">Selecionar Perfil</h2>
             </div>
 
-            <div className="relative mb-10 group">
-                <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-zinc-500 group-focus-within:text-brand-neon transition-colors" size={20} />
+            <div className="relative mb-8 group">
+                <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-zinc-600 group-focus-within:text-brand-neon transition-colors" size={24} />
                 <input 
                     type="text" 
                     placeholder="BUSCAR ATLETA..." 
@@ -950,7 +953,7 @@ function StudentLoginList({ students, onLogin, onBack }: { students: UserProfile
 
             <div className="grid gap-3">
                 {filtered.map(student => (
-                    <div key={student.id} onClick={() => { setSelectedForAuth(student); setError(""); setPhoneInput(""); }} 
+                    <div key={student.id} onClick={() => onLogin(student)} 
                         className="flex items-center justify-between p-5 bg-brand-light/30 border border-transparent hover:border-brand-neon/30 hover:bg-brand-light/50 rounded-2xl cursor-pointer transition-all group">
                         <div className="flex items-center gap-5">
                             <div className="w-12 h-12 bg-brand-dark rounded-xl flex items-center justify-center text-zinc-500 font-black text-lg group-hover:text-brand-neon transition-colors border border-white/5 font-display">
@@ -967,25 +970,6 @@ function StudentLoginList({ students, onLogin, onBack }: { students: UserProfile
                     </div>
                 ))}
             </div>
-
-            {selectedForAuth && (
-                <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-6">
-                    <Card className="max-w-md w-full animate-in zoom-in-95 duration-200 border-brand-neon/20 shadow-[0_0_50px_-10px_rgba(207,255,4,0.1)]">
-                        <div className="flex justify-between items-start mb-8">
-                            <div>
-                                <h3 className="text-3xl font-black italic uppercase tracking-tighter text-white font-display">Segurança</h3>
-                                <p className="text-zinc-400 text-xs mt-1 uppercase tracking-wider">Confirme seu número</p>
-                            </div>
-                            <button onClick={() => setSelectedForAuth(null)} className="text-zinc-500 hover:text-white"><X /></button>
-                        </div>
-                        <div className="space-y-6">
-                            <Input label="Celular Cadastrado" placeholder="11999999999" value={phoneInput} onChange={setPhoneInput} type="tel" className="bg-brand-dark" />
-                            {error && <p className="text-red-500 text-xs font-bold flex items-center gap-2 uppercase tracking-wide"><AlertCircle size={14}/> {error}</p>}
-                            <Button onClick={handleAuth} className="w-full py-5 text-sm">Acessar Painel</Button>
-                        </div>
-                    </Card>
-                </div>
-            )}
         </div>
     )
 }
@@ -1409,7 +1393,7 @@ function WorkoutBuilder({ student, onClose }: { student: UserProfile, onClose: (
         setFormData(prev => ({ ...prev, [field]: value }));
     }
 
-    const handleSave = () => {
+    const handleSave = async () => {
         setLoading(true);
         const payload: any = {
             studentId: student.id,
@@ -1426,13 +1410,14 @@ function WorkoutBuilder({ student, onClose }: { student: UserProfile, onClose: (
             createdAt: new Date().toISOString()
         };
 
-        addDoc(collection(db, 'artifacts', appId, 'workouts'), payload)
-            .catch(e => console.error(e));
+        try {
+            await addDoc(collection(db, 'artifacts', appId, 'workouts'), payload);
+            onClose(); // Close the form after successful save
+        } catch (e) {
+            console.error(e);
+        }
             
-        setTimeout(() => {
-            setLoading(false);
-            // Não fechamos o form (onClose) para permitir reaproveitar os dados
-        }, 400);
+        setLoading(false);
     };
 
     return (
@@ -1486,17 +1471,17 @@ function StudentView({ profile }: { profile: UserProfile }) {
     useEffect(() => {
         if (!profile.id) return;
         // Fetch Workouts (Templates)
-        const qW = collection(db, 'artifacts', appId, 'workouts');
+        const qW = query(collection(db, 'artifacts', appId, 'workouts'), where('studentId', '==', profile.id));
         const unsubW = onSnapshot(qW, (snap) => {
             const data = snap.docs.map(d => ({id: d.id, ...d.data()} as WorkoutModel));
-            setWorkouts(data.filter(w => w.studentId === profile.id));
+            setWorkouts(data);
         });
 
         // Fetch Check-ins
-        const qC = collection(db, 'artifacts', appId, 'checkins');
+        const qC = query(collection(db, 'artifacts', appId, 'checkins'), where('studentId', '==', profile.id));
         const unsubC = onSnapshot(qC, (snap) => {
             const data = snap.docs.map(d => ({id: d.id, ...d.data()} as CheckIn));
-            setCheckIns(data.filter(c => c.studentId === profile.id));
+            setCheckIns(data);
         });
 
         return () => { unsubW(); unsubC(); };
